@@ -24,19 +24,22 @@ class CommaModel(nn.Module):
         self.conv = nn.Sequential(*layers)
 
         # global average pool over time → [B, C]
-        self.head = nn.Sequential(
-            nn.Linear(channels, 512),
-            nn.ReLU(),
-            nn.Linear(512, 512)      # final logits per class (no sigmoid)
-        )
+        # self.head = nn.Sequential(
+        #     nn.Linear(channels, 512),
+        #     nn.ReLU(),
+        #     nn.Linear(512, 512)      # final logits per class (no sigmoid)
+        # )
+
+        self.head = nn.Conv1d(channels, 1, kernel_size=1)
+        
 
     def forward(self, input_ids):         # input_ids: [B, T] (long)
         x = self.embed(input_ids)         # [B, T, E]
         x = self.in_proj(x)               # [B, T, C]
         x = x.transpose(1, 2)             # [B, C, T] for Conv1d
         x = self.conv(x)                  # [B, C, T]
-        x = x.mean(dim=2)                 # global avg pool over T -> [B, C]
-        logits = self.head(x)             # [B, 512]
+        # x = x.mean(dim=2)                 # global avg pool over T -> [B, C]
+        logits = self.head(x).squeeze(1)             # [B, 512]
         return logits
 
     
@@ -73,7 +76,7 @@ class CommaModel(nn.Module):
         # Loss function (no need for reduction='none'; we average per batch then overall)
         if pos_weight is not None:
             if isinstance(pos_weight, (float, int)):
-                pos_weight = torch.tensor(pos_weight, device=device)
+                pos_weight = torch.tensor(float(pos_weight), device=device)
             loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         else:
             loss_fn = nn.BCEWithLogitsLoss()
