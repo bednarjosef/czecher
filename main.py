@@ -17,8 +17,9 @@ def main():
     # dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/dataset.csv', max_len=512)
     tokenizer = CharTokenizer().load_vocabulary('data/vocabulary.csv')
     dataset = CommaDataset().load_dataset('data/dataset.csv')
-    model = CommaModel(embedding_dim=128, vocab_size=tokenizer.vocab_size(), unk_id=tokenizer.get_token_id('[PAD]'))
-    train_model(model, dataset, epochs=10)
+    model = CommaModel(embedding_dim=128, vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_token_id('[PAD]'))
+    train_model(model, dataset, epochs=1)
+    model.save('model.pt')
 
 
 if __name__ == '__main__':

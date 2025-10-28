@@ -1,3 +1,5 @@
+import os
+from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,10 +7,11 @@ from torch.optim import AdamW
 
 
 class CommaModel(nn.Module):
-    def __init__(self, vocab_size: int, unk_id: int, embedding_dim: int = 128,
+    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 128,
                  channels: int = 128, kernel_size: int = 5, n_layers: int = 3, dropout: float = 0.1):
         super().__init__()
-        self.embed = nn.Embedding(vocab_size, embedding_dim, padding_idx=unk_id)
+        self.pad_id = pad_id
+        self.embed = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_id)
 
         # project embeddings to conv channels if needed
         self.in_proj = nn.Linear(embedding_dim, channels) if embedding_dim != channels else nn.Identity()
@@ -22,15 +25,34 @@ class CommaModel(nn.Module):
                 nn.Dropout(dropout)
             ]
         self.conv = nn.Sequential(*layers)
-
-        # global average pool over time → [B, C]
-        # self.head = nn.Sequential(
-        #     nn.Linear(channels, 512),
-        #     nn.ReLU(),
-        #     nn.Linear(512, 512)      # final logits per class (no sigmoid)
-        # )
-
         self.head = nn.Conv1d(channels, 1, kernel_size=1)
+
+        self._config = dict(
+            vocab_size=vocab_size,
+            pad_id=pad_id,
+            embedding_dim=embedding_dim,
+            channels=channels,
+            kernel_size=kernel_size,
+            n_layers=n_layers,
+            dropout=dropout,
+        )
+    
+    def save(self, path: str = 'model.pt') -> None:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        payload = {
+            "config": self._config,
+            "state_dict": self.state_dict(),
+            "format": "CommaModel.v1",
+        }
+        torch.save(payload, path)
+
+    @classmethod
+    def load(cls, path: str = 'model.pt', map_location: Optional[str | torch.device] = None) -> "CommaModel":
+        ckpt = torch.load(path, map_location=map_location)
+        config = ckpt["config"]
+        model = cls(**config)
+        model.load_state_dict(ckpt["state_dict"], strict=True)
+        return model
         
 
     def forward(self, input_ids):         # input_ids: [B, T] (long)
@@ -55,8 +77,9 @@ class CommaModel(nn.Module):
             inputs = batch['inputs'].to(device).long()
             labels = batch['labels'].to(device).float()
 
-            predictions = self(inputs)
-            loss = loss_fn(predictions, labels)
+            logits = self(inputs)
+            mask = (inputs != self.pad_id)
+            loss = loss_fn(logits[mask], labels[mask])
             
             optimizer.zero_grad()
             loss.backward()
@@ -92,20 +115,20 @@ class CommaModel(nn.Module):
             labels = batch['labels'].to(device).float()
 
             logits = self(inputs)                  # [B, 512] (or [B, 1])
-            loss = loss_fn(logits, labels)
+            mask = (inputs != self.pad_id)
+
+            loss = loss_fn(logits[mask], labels[mask])
             total_loss += float(loss.item())
             n_batches += 1
 
             probs = torch.sigmoid(logits)
-            preds = (probs >= threshold)
+            preds = (probs >= threshold) & mask
+            y_true = (labels >= 0.5).bool() & mask
 
-            y_true = (labels >= 0.5).bool()
-            y_pred = preds.bool()
-
-            tp += (y_pred &  y_true).sum().item()
-            fp += (y_pred & ~y_true).sum().item()
-            fn += (~y_pred &  y_true).sum().item()
-            tn += (~y_pred & ~y_true).sum().item()
+            tp += (preds &  y_true).sum().item()
+            fp += (preds & ~y_true).sum().item()
+            fn += (~preds &  y_true).sum().item()
+            tn += (~preds & ~y_true).sum().item()
 
         # Safeguards against divide-by-zero
         precision = tp / (tp + fp + 1e-12)
