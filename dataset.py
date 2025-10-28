@@ -26,7 +26,7 @@ class CommaDataset(Dataset):
         return self[random.randint(0, len(self))]
     
     def get_data_pair(self, sentence: str, max_len: int):
-        formatted = sentence.strip(',')
+        formatted = sentence.replace(',', '')
         in_tokens = self.tokenizer.tokenize(formatted, max_len=max_len)
         probabilities = [0] * max_len
         commas_found = 0

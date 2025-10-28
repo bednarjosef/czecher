@@ -1,60 +1,31 @@
 import torch
 from torch.utils.data import DataLoader
+from char_tokenizer import CharTokenizer
+from czecher_model import CommaModel
+from dataset import CommaDataset
 
-from czecher_model import masked_bce_with_logits
 
 def collate(batch):
-    # batch: list of {"sentence": list[int], "commas": list[int]}
-    input_ids = torch.tensor([b["sentence"] for b in batch], dtype=torch.long)
-    labels    = torch.tensor([b["commas"]   for b in batch], dtype=torch.float32)
-    # attention: everything that is not PAD is True
-    pad_id = input_ids[0,0].item()  # careful: this only works if PAD==id 0 at position 0; better pass pad_id explicitly
-    attention_mask = ~input_ids.eq(pad_id)
-    return {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask}
+    inputs = torch.tensor([b['sentence'] for b in batch], dtype=torch.long)
+    labels = torch.tensor([b['commas'] for b in batch], dtype=torch.float32)
+    return { 'inputs': inputs, 'labels': labels }
 
-def train_one_epoch(model, loader, optimizer, pad_id, bos_id, eos_id, pos_weight=4.0, device="cuda"):
-    model.train()
-    tot = 0.0
-    cnt = 0  
-    for batch in loader:
-        input_ids = batch["input_ids"].to(device)
-        labels = batch["labels"].to(device)
-        attention_mask = batch["attention_mask"].to(device)
 
-        logits = model(input_ids, attention_mask)
-        loss, mask = masked_bce_with_logits(
-            logits, labels, input_ids, pad_id, bos_id, eos_id, pos_weight=pos_weight
-        )
-        optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
+def train_model(model: CommaModel, dataset: CommaDataset, epochs: int):
+    print(f'Creating splits...')
+    split = int(0.95 * len(dataset))
+    train_ds, dev_ds = torch.utils.data.random_split(dataset, [split, len(dataset)-split])
 
-        tot += loss.item()
-        cnt += 1
-    return tot / max(1, cnt)
+    print(f'Creating DataLoaders...')
+    train_loader = DataLoader(train_ds, batch_size=64, shuffle=True, collate_fn=collate)
+    eval_loader   = DataLoader(dev_ds, batch_size=64, shuffle=False, collate_fn=collate)
 
-@torch.no_grad()
-def evaluate(model, loader, pad_id, bos_id, eos_id, thresh=0.5, device="cuda"):
-    model.eval()
-    tp=fp=fn=0
-    for batch in loader:
-        input_ids = batch["input_ids"].to(device)
-        labels = batch["labels"].to(device)
-        attention_mask = batch["attention_mask"].to(device)
+    print(f'Loading model and optimizer...')
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = model.to(device)
 
-        logits = model(input_ids, attention_mask)
-        probs = logits.sigmoid()
-        mask = ~input_ids.eq(pad_id) & ~input_ids.eq(bos_id) & ~input_ids.eq(eos_id)
-
-        pred = (probs >= thresh).float()
-        y = labels
-
-        tp += ((pred==1) & (y==1) & mask).sum().item()
-        fp += ((pred==1) & (y==0) & mask).sum().item()
-        fn += ((pred==0) & (y==1) & mask).sum().item()
-
-    prec = tp/(tp+fp+1e-9)
-    rec  = tp/(tp+fn+1e-9)
-    f1 = 2*prec*rec/(prec+rec+1e-9)
-    return prec, rec, f1
+    print(f'Beginning training...')
+    for epoch in range(epochs):
+        epoch_loss = model.train_epoch(train_loader, 8, device)
+        evals = model.evaluate(eval_loader, threshold=0.5, pos_weight=8, device=device)
+        print(f"Epoch {epoch+1}: loss={epoch_loss:.4f}  P/R/F1={evals['precision']:.3f}/{evals['recall']:.3f}/{evals['f1']:.3f}")
