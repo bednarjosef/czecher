@@ -151,40 +151,26 @@ class CommaModel(nn.Module):
         }
     
     @torch.no_grad()
-    def predict_commas_ids(self, input_ids, threshold: float = 0.5, device=None):
-        """
-        Run model on a single sequence of token IDs and return:
-          - comma_idxs: list of positions (int) where prob >= threshold (and not PAD)
-          - probs:      list of per-position probabilities (float)
-        input_ids: 1D iterable of ints (length T)
-        """
+    def predict_comma_ids(self, input_ids, threshold: float = 0.5, device='cpu'):
+        """Get the idxs of chars after which to add a comma."""
         self.eval()
-        if device is None:
-            device = next(self.parameters()).device
-
         x = torch.as_tensor(input_ids, dtype=torch.long, device=device).unsqueeze(0)  # [1, T]
         logits = self(x)                              # [1, T]
         probs = torch.sigmoid(logits)[0]              # [T]
         mask = (x[0] != self.pad_id)
 
         comma_idxs = torch.nonzero((probs >= threshold) & mask, as_tuple=False).flatten().tolist()
+
+        # Subtract 1 because of BOS token
+        for c_idx in comma_idxs:
+            c_idx -= 1
         return comma_idxs, probs.detach().cpu().tolist()
 
     @torch.no_grad()
-    def punctuate(self, text: str, tokenizer, threshold: float = 0.5,
-                  comma_with_space: bool = True, device=None):
-        """
-        Encode a commaless sentence, predict comma positions, and return the string with commas inserted.
-        - tokenizer must expose a char-level encode(text)->List[int] (no BOS/EOS); decode not needed.
-        - If your tokenizer adds specials, remove them so len(ids) == len(text).
-        """
-        # Encode to ids
-        ids = tokenizer.tokenize(text)  # must be 1:1 with characters in `text`
-        # (If your tokenizer adds specials, e.g., [BOS] ... [EOS], do: ids = ids[1:-1])
-
-        comma_idxs, probs = self.predict_commas_ids(ids, threshold=threshold, device=device)
-
-        # Build the output string by inserting commas *after* positions in comma_idxs
+    def punctuate(self, text: str, tokenizer, threshold: float = 0.5, device='cpu'):
+        """Return a corrected sentence."""
+        ids = tokenizer.tokenize(text)
+        comma_idxs, probs = self.predict_comma_ids(ids, threshold=threshold, device=device)
         out = []
         T = len(text)
         comma_set = set(comma_idxs)
@@ -192,17 +178,7 @@ class CommaModel(nn.Module):
         for i, ch in enumerate(text):
             out.append(ch)
             if i in comma_set:
-                # optionally skip inserting a comma if the next char is already punctuation
-                # if i+1 < T and text[i+1] in ",.;:!?":
-                #     continue
-                if comma_with_space:
-                    # insert ", " unless there is already a space next
-                    if i+1 < T and text[i+1].isspace():
-                        out.append(",")
-                    else:
-                        out.append(", ")
-                else:
-                    out.append(",")
+                out.append(",")
 
         punctuated = "".join(out)
-        return punctuated, probs  # return probs for debugging/visualization if you want
+        return punctuated

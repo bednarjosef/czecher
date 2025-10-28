@@ -6,7 +6,7 @@ from pathlib import Path
 
 MIN_LEN = 20
 MAX_LEN = 512
-TARGET_SENTENCES = 100_000 + 8
+TARGET_SENTENCES = 500_000 + 8
 N_PAGES = 10_000
 
 

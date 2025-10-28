@@ -11,14 +11,14 @@ def collate(batch):
     return { 'inputs': inputs, 'labels': labels }
 
 
-def train_model(model: CommaModel, dataset: CommaDataset, epochs: int):
+def train_model(model: CommaModel, dataset: CommaDataset, epochs: int, batch_size: int = 64):
     print(f'Creating splits...')
-    split = int(0.95 * len(dataset))
+    split = int(0.90 * len(dataset))
     train_ds, dev_ds = torch.utils.data.random_split(dataset, [split, len(dataset)-split])
 
     print(f'Creating DataLoaders...')
-    train_loader = DataLoader(train_ds, batch_size=64, shuffle=True, collate_fn=collate)
-    eval_loader   = DataLoader(dev_ds, batch_size=64, shuffle=False, collate_fn=collate)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate)
+    eval_loader   = DataLoader(dev_ds, batch_size=batch_size, shuffle=False, collate_fn=collate)
 
     print(f'Loading model and optimizer...')
     device = "cuda" if torch.cuda.is_available() else "cpu"
