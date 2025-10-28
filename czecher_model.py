@@ -45,6 +45,7 @@ class CommaModel(nn.Module):
             "format": "CommaModel.v1",
         }
         torch.save(payload, path)
+        print(f'Model saved to {path}.')
 
     @classmethod
     def load(cls, path: str = 'model.pt', map_location: Optional[str | torch.device] = None) -> "CommaModel":
@@ -52,6 +53,7 @@ class CommaModel(nn.Module):
         config = ckpt["config"]
         model = cls(**config)
         model.load_state_dict(ckpt["state_dict"], strict=True)
+        print(f'Model loaded from {path}.')
         return model
         
 
@@ -148,25 +150,59 @@ class CommaModel(nn.Module):
             'threshold': threshold,
         }
     
-    # def evaluate(self, eval_loader):
-    #     self.eval()
-    #     tp=fp=fn=0
-    #     for batch in eval_loader:
-    #         inputs = batch["input_ids"].to(device)
-    #         labels = batch["labels"].to(device)
-    #         attention_mask = batch["attention_mask"].to(device)
+    @torch.no_grad()
+    def predict_commas_ids(self, input_ids, threshold: float = 0.5, device=None):
+        """
+        Run model on a single sequence of token IDs and return:
+          - comma_idxs: list of positions (int) where prob >= threshold (and not PAD)
+          - probs:      list of per-position probabilities (float)
+        input_ids: 1D iterable of ints (length T)
+        """
+        self.eval()
+        if device is None:
+            device = next(self.parameters()).device
 
-    #         logits = self(inputs, attention_mask)
-    #         probs = logits.sigmoid()
+        x = torch.as_tensor(input_ids, dtype=torch.long, device=device).unsqueeze(0)  # [1, T]
+        logits = self(x)                              # [1, T]
+        probs = torch.sigmoid(logits)[0]              # [T]
+        mask = (x[0] != self.pad_id)
 
-    #         pred = (probs >= thresh).float()
-    #         y = labels
+        comma_idxs = torch.nonzero((probs >= threshold) & mask, as_tuple=False).flatten().tolist()
+        return comma_idxs, probs.detach().cpu().tolist()
 
-    #         tp += ((pred==1) & (y==1) & mask).sum().item()
-    #         fp += ((pred==1) & (y==0) & mask).sum().item()
-    #         fn += ((pred==0) & (y==1) & mask).sum().item()
+    @torch.no_grad()
+    def punctuate(self, text: str, tokenizer, threshold: float = 0.5,
+                  comma_with_space: bool = True, device=None):
+        """
+        Encode a commaless sentence, predict comma positions, and return the string with commas inserted.
+        - tokenizer must expose a char-level encode(text)->List[int] (no BOS/EOS); decode not needed.
+        - If your tokenizer adds specials, remove them so len(ids) == len(text).
+        """
+        # Encode to ids
+        ids = tokenizer.tokenize(text)  # must be 1:1 with characters in `text`
+        # (If your tokenizer adds specials, e.g., [BOS] ... [EOS], do: ids = ids[1:-1])
 
-    #     prec = tp/(tp+fp+1e-9)
-    #     rec  = tp/(tp+fn+1e-9)
-    #     f1 = 2*prec*rec/(prec+rec+1e-9)
-    #     return prec, rec, f1
+        comma_idxs, probs = self.predict_commas_ids(ids, threshold=threshold, device=device)
+
+        # Build the output string by inserting commas *after* positions in comma_idxs
+        out = []
+        T = len(text)
+        comma_set = set(comma_idxs)
+
+        for i, ch in enumerate(text):
+            out.append(ch)
+            if i in comma_set:
+                # optionally skip inserting a comma if the next char is already punctuation
+                # if i+1 < T and text[i+1] in ",.;:!?":
+                #     continue
+                if comma_with_space:
+                    # insert ", " unless there is already a space next
+                    if i+1 < T and text[i+1].isspace():
+                        out.append(",")
+                    else:
+                        out.append(", ")
+                else:
+                    out.append(",")
+
+        punctuated = "".join(out)
+        return punctuated, probs  # return probs for debugging/visualization if you want

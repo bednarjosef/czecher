@@ -17,9 +17,18 @@ def main():
     # dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/dataset.csv', max_len=512)
     tokenizer = CharTokenizer().load_vocabulary('data/vocabulary.csv')
     dataset = CommaDataset().load_dataset('data/dataset.csv')
-    model = CommaModel(embedding_dim=128, vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_token_id('[PAD]'))
-    train_model(model, dataset, epochs=1)
-    model.save('model.pt')
+    model = CommaModel(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_token_id('[PAD]'), embedding_dim=128)
+    # train_model(model, dataset, epochs=1)
+    # model.save('data/model.pt')
+    model = model.load('data/model.pt')
+    text = "kdyz jsem prisel domu vsechno bylo potichu"
+    punctuated, probs = model.punctuate(text, tokenizer, threshold=0.4, comma_with_space=True)
+    print("INPUT: ", text)
+    print("OUTPUT:", punctuated)
+    # If you want to see which indices fired:
+    idxs, _ = model.predict_commas_ids(tokenizer.tokenize(text), threshold=0.4)
+    print("Comma indices:", idxs)
+
 
 
 if __name__ == '__main__':
