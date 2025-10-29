@@ -6,36 +6,50 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 
 
-class CommaModel(nn.Module):
-    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 128,
-                 channels: int = 128, kernel_size: int = 5, n_layers: int = 3, dropout: float = 0.1):
+class CzecherTransformer(nn.Module):
+    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 128):
         super().__init__()
+        max_len = 512
+        d_model = 128
+        nhead = 4
+        num_layers = 6
+        dim_ff = 1024
+        dropout = 0.1
         self.pad_id = pad_id
         self.embed = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_id)
+        self.pos = nn.Embedding(max_len, d_model)
 
-        # project embeddings to conv channels if needed
-        self.in_proj = nn.Linear(embedding_dim, channels) if embedding_dim != channels else nn.Identity()
-
-        layers = []
-        pad = (kernel_size - 1) // 2  # "same" padding for odd kernels
-        for _ in range(n_layers):
-            layers += [
-                nn.Conv1d(channels, channels, kernel_size, padding=pad),
-                nn.ReLU(),
-                nn.Dropout(dropout)
-            ]
-        self.conv = nn.Sequential(*layers)
-        self.head = nn.Conv1d(channels, 1, kernel_size=1)
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=dim_ff,
+            dropout=dropout, batch_first=True, activation="gelu"
+        )
+        self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_layers)
+        self.head = nn.Linear(d_model, 1)
 
         self._config = dict(
             vocab_size=vocab_size,
             pad_id=pad_id,
             embedding_dim=embedding_dim,
-            channels=channels,
-            kernel_size=kernel_size,
-            n_layers=n_layers,
+            max_len=max_len,
+            d_model=d_model,
+            nhead=nhead,
+            num_layers=num_layers,
+            dim_ff=dim_ff,
             dropout=dropout,
         )
+    
+    def forward(self, input_ids):
+        B, T = input_ids.shape
+        device = input_ids.device
+        pos_ids = torch.arange(T, device=device).unsqueeze(0).expand(B, T)
+
+        x = self.embed(input_ids) + self.pos(pos_ids)
+        key_pad = input_ids.eq(self.pad_id)
+
+        h = self.encoder(x, src_key_padding_mask=key_pad)
+        logits = self.head(h).squeeze(-1)
+        return logits
+
     
     def save(self, path: str = 'model.pt') -> None:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -55,25 +69,14 @@ class CommaModel(nn.Module):
         model.load_state_dict(ckpt["state_dict"], strict=True)
         print(f'Model loaded from {path}.')
         return model
-        
-
-    def forward(self, input_ids):         # input_ids: [B, T] (long)
-        x = self.embed(input_ids)         # [B, T, E]
-        x = self.in_proj(x)               # [B, T, C]
-        x = x.transpose(1, 2)             # [B, C, T] for Conv1d
-        x = self.conv(x)                  # [B, C, T]
-        # x = x.mean(dim=2)                 # global avg pool over T -> [B, C]
-        logits = self.head(x).squeeze(1)             # [B, 512]
-        return logits
-
     
     def train_epoch(self, train_loader, weight = 8, device = 'cpu'):
         self.train()
-
+        self.to(device)
         optimizer = AdamW(self.parameters(), lr=2e-4)  # 0.0002 ?
         loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(weight), device=device))
 
-        total = 0.0
+        total_loss = 0.0
         for batch in train_loader:
             # print(batch)
             inputs = batch['inputs'].to(device).long()
@@ -86,10 +89,9 @@ class CommaModel(nn.Module):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-
-            total += float(loss.item())
+            total_loss += float(loss.item())
         
-        return total / max(1, len(train_loader))
+        return total_loss / max(1, len(train_loader))
     
     @torch.no_grad()
     def evaluate(self, eval_loader, threshold: float = 0.5, pos_weight=None, device=None):

@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from char_tokenizer import CharTokenizer
-from czecher_model import CommaModel
+from cnn_model import CzecherCNN
 from dataset import CommaDataset
 
 
@@ -11,7 +11,7 @@ def collate(batch):
     return { 'inputs': inputs, 'labels': labels }
 
 
-def train_model(model: CommaModel, dataset: CommaDataset, epochs: int, batch_size: int = 64):
+def train_model(model: CzecherCNN, dataset: CommaDataset, epochs: int, batch_size: int = 64):
     print(f'Creating splits...')
     split = int(0.90 * len(dataset))
     train_ds, dev_ds = torch.utils.data.random_split(dataset, [split, len(dataset)-split])

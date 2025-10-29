@@ -2,7 +2,7 @@ from pathlib import Path
 from dataset import CommaDataset
 from char_tokenizer import CharTokenizer
 # from download_wiki_texts import load_sentences
-from czecher_model import CommaModel
+from cnn_model import CzecherCNN
 from train import train_model
 
 
@@ -23,7 +23,7 @@ def main():
     # dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/dataset.csv', max_len=512)
     tokenizer = CharTokenizer().load_vocabulary('data/vocabulary.csv')
     dataset = CommaDataset().load_dataset('data/dataset.csv')
-    model = CommaModel(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_token_id('[PAD]'), embedding_dim=128)
+    model = CzecherCNN(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_token_id('[PAD]'), embedding_dim=128)
     train_model(model, dataset, epochs=10, batch_size=128)
     model.save('data/model2.pt')
     # model = model.load('data/model.pt')
