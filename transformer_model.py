@@ -62,7 +62,7 @@ class CzecherTransformer(nn.Module):
             optimizer.zero_grad(set_to_none=True)
 
             if device == 'cuda':
-                with torch.amp.autocast(dtype=torch.float16):
+                with torch.amp.autocast(device_type=device, dtype=torch.float16):
                     logits = self(inputs)
                     mask = (inputs != self.pad_id)
                     loss = loss_fn(logits[mask], labels[mask])
@@ -76,11 +76,12 @@ class CzecherTransformer(nn.Module):
             scaler.update()
             total_loss += float(loss.item())
             
-            total_time = time.time() - ts
-            avg_batch_time = round(total_time / idx, 2)
-            print(f'Trained batch {idx}/{total_batches} - {avg_batch_time}s / batch')
-
         
+        total_time = time.time() - ts
+        avg_batch_time = round(total_time / idx, 4)
+        batches_per_second = round(1 / avg_batch_time, 4)
+        print(f'Trained epoch {idx} in {round(total_time, 2)}s - {batches_per_second} batches / second')
+    
         return total_loss / max(1, len(train_loader))
 
     
