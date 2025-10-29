@@ -1,4 +1,5 @@
 from pathlib import Path
+from bpe_tokenizer import GPTTokenizer
 from dataset import CommaDataset
 from char_tokenizer import CharTokenizer
 # from download_wiki_texts import load_sentences
@@ -45,15 +46,16 @@ def estimate_pos_weight(tokenizer: CharTokenizer, dataset, device="cpu"):
 def main():
     print('Hello world!')
     # sentences = load_sentences(path='data/sentences.txt')
-    # tokenizer = CharTokenizer().build_vocabulary(sentences, 'data/vocabulary.csv')
+    # tokenizer = GPTTokenizer().build_vocabulary(sentences, 'gpt_tokenizer/vocabulary.csv')
     # dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/dataset.csv', max_len=512)
-    tokenizer = CharTokenizer().load_vocabulary('data/vocabulary.csv')
+    tokenizer = GPTTokenizer().load_vocabulary('gpt_tokenizer/vocabulary.csv')
     dataset = CommaDataset().load_dataset('data/dataset.csv')
     # pos = estimate_pos_weight(tokenizer, dataset, 'cpu')
+    # print(pos)
     model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_token_id('[PAD]'), embedding_dim=128)
-    train_model(model, dataset, epochs=1, batch_size=256)
-    model.save('data/transformer_model5.pt')
-    # model = model.load('data/transformer_model2.pt')
+    train_model(model, dataset, epochs=5, batch_size=256)
+    model.save('data/transformer_model7.pt')
+    # model = model.load('data/transformer_model7.pt')
     # text = "V roce 1971 pak Salivarová a Škvorecký založili nakladatelství '68 Publishers kde pak vydávali především české knihy které nemohly vycházet v komunistickém Československu."
     # correct_sentence(text, model, tokenizer)
 

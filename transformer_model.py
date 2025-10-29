@@ -81,7 +81,7 @@ class CzecherTransformer(nn.Module):
         total_time = time.time() - ts
         avg_batch_time = round(total_time / step, 4)
         batches_per_second = round(1 / avg_batch_time, 4)
-        print(f'Trained epoch {step} in {round(total_time, 2)}s - {batches_per_second} batches / second')
+        print(f'Trained epoch in {round(total_time, 2)}s - {batches_per_second} batches / second')
         best = self.find_best_threshold(eval_loader, device=device)
         print(f"Best threshold = {best['th']:.2f}  P={best['p']:.3f} R={best['r']:.3f} F1={best['f1']:.3f}")
 
