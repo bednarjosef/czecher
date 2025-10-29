@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Optional
 import torch
 import torch.nn as nn
@@ -7,14 +8,8 @@ from torch.optim import AdamW
 
 
 class CzecherTransformer(nn.Module):
-    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 128):
+    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 128, max_len: int = 512, d_model: int = 128, nhead: int = 4, num_layers: int = 2, dim_ff: int = 256, dropout: float = 0.1):
         super().__init__()
-        max_len = 512
-        d_model = 128
-        nhead = 4
-        num_layers = 6
-        dim_ff = 1024
-        dropout = 0.1
         self.pad_id = pad_id
         self.embed = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_id)
         self.pos = nn.Embedding(max_len, d_model)
@@ -49,6 +44,44 @@ class CzecherTransformer(nn.Module):
         h = self.encoder(x, src_key_padding_mask=key_pad)
         logits = self.head(h).squeeze(-1)
         return logits
+    
+    def train_epoch(self, train_loader, weight = 8, device = 'cpu'):
+        self.train()
+        self.to(device)
+
+        scaler = torch.amp.GradScaler(device)
+        optimizer = AdamW(self.parameters(), lr=3e-4)  # 0.0002 ?
+        loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(weight), device=device))
+
+        total_loss = 0.0
+        total_batches = len(train_loader)
+        ts = time.time()
+        for idx, batch in enumerate(train_loader, start=1):
+            inputs = batch['inputs'].to(device).long()
+            labels = batch['labels'].to(device).float()
+            optimizer.zero_grad(set_to_none=True)
+
+            if device == 'cuda':
+                with torch.amp.autocast(dtype=torch.float16):
+                    logits = self(inputs)
+                    mask = (inputs != self.pad_id)
+                    loss = loss_fn(logits[mask], labels[mask])
+            else:
+                logits = self(inputs)
+                mask = (inputs != self.pad_id)
+                loss = loss_fn(logits[mask], labels[mask])
+            
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            total_loss += float(loss.item())
+            
+            total_time = time.time() - ts
+            avg_batch_time = round(total_time / idx, 2)
+            print(f'Trained batch {idx}/{total_batches} - {avg_batch_time}s / batch')
+
+        
+        return total_loss / max(1, len(train_loader))
 
     
     def save(self, path: str = 'model.pt') -> None:
@@ -69,29 +102,6 @@ class CzecherTransformer(nn.Module):
         model.load_state_dict(ckpt["state_dict"], strict=True)
         print(f'Model loaded from {path}.')
         return model
-    
-    def train_epoch(self, train_loader, weight = 8, device = 'cpu'):
-        self.train()
-        self.to(device)
-        optimizer = AdamW(self.parameters(), lr=2e-4)  # 0.0002 ?
-        loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(weight), device=device))
-
-        total_loss = 0.0
-        for batch in train_loader:
-            # print(batch)
-            inputs = batch['inputs'].to(device).long()
-            labels = batch['labels'].to(device).float()
-
-            logits = self(inputs)
-            mask = (inputs != self.pad_id)
-            loss = loss_fn(logits[mask], labels[mask])
-            
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += float(loss.item())
-        
-        return total_loss / max(1, len(train_loader))
     
     @torch.no_grad()
     def evaluate(self, eval_loader, threshold: float = 0.5, pos_weight=None, device=None):
