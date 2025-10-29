@@ -5,16 +5,41 @@ from char_tokenizer import CharTokenizer
 from cnn_model import CzecherCNN
 from train import train_model
 from transformer_model import CzecherTransformer
+import torch
+from torch.utils.data import DataLoader
 
 
 def load_sentences(path="sentences.txt"):
     return [line.rstrip("\n") for line in Path(path).read_text(encoding="utf-8").splitlines()]
 
-
 def correct_sentence(text, model, tokenizer):
     punctuated = model.punctuate(text, tokenizer, threshold=0.5)
     print("INPUT: ", text)
     print("OUTPUT:", punctuated)
+
+def collate(batch):
+    inputs = torch.tensor([b['sentence'] for b in batch], dtype=torch.long)
+    labels = torch.tensor([b['commas'] for b in batch], dtype=torch.float32)
+    return { 'inputs': inputs, 'labels': labels }
+
+def estimate_pos_weight(tokenizer: CharTokenizer, dataset, device="cpu"):
+    pad_id = tokenizer.get_token_id('[PAD]')
+    split = int(0.90 * len(dataset))
+    train_ds, dev_ds = torch.utils.data.random_split(dataset, [split, len(dataset)-split])
+
+    print(f'Creating DataLoaders...')
+    train_loader = DataLoader(train_ds, batch_size=256, shuffle=True, collate_fn=collate)
+    eval_loader = DataLoader(dev_ds, batch_size=256, shuffle=False, collate_fn=collate)
+
+    pos = tot = 0
+    for batch in train_loader:
+        y = batch['labels'].to(device).float()
+        x = batch['inputs'].to(device).long()
+        mask = x.ne(pad_id)
+        pos += (y[mask] > 0.5).sum().item()
+        tot += mask.sum().item()
+    pi = pos / max(1, tot)
+    return (1 - pi) / max(1e-6, pi), pi
 
 
 def main():
@@ -24,9 +49,10 @@ def main():
     # dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/dataset.csv', max_len=512)
     tokenizer = CharTokenizer().load_vocabulary('data/vocabulary.csv')
     dataset = CommaDataset().load_dataset('data/dataset.csv')
+    # pos = estimate_pos_weight(tokenizer, dataset, 'cpu')
     model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_token_id('[PAD]'), embedding_dim=128)
     train_model(model, dataset, epochs=1, batch_size=256)
-    model.save('data/transformer_model2.pt')
+    model.save('data/transformer_model5.pt')
     # model = model.load('data/transformer_model2.pt')
     # text = "V roce 1971 pak Salivarová a Škvorecký založili nakladatelství '68 Publishers kde pak vydávali především české knihy které nemohly vycházet v komunistickém Československu."
     # correct_sentence(text, model, tokenizer)

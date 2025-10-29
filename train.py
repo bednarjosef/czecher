@@ -18,7 +18,7 @@ def train_model(model: CzecherCNN, dataset: CommaDataset, epochs: int, batch_siz
 
     print(f'Creating DataLoaders...')
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate)
-    eval_loader   = DataLoader(dev_ds, batch_size=batch_size, shuffle=False, collate_fn=collate)
+    eval_loader = DataLoader(dev_ds, batch_size=batch_size, shuffle=False, collate_fn=collate)
 
     print(f'Loading model and optimizer...')
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -26,6 +26,6 @@ def train_model(model: CzecherCNN, dataset: CommaDataset, epochs: int, batch_siz
 
     print(f'Beginning training...')
     for epoch in range(epochs):
-        epoch_loss = model.train_epoch(train_loader, 8, device)
-        evals = model.evaluate(eval_loader, threshold=0.5, pos_weight=8, device=device)
+        epoch_loss = model.train_epoch(train_loader, eval_loader, 8, device)
+        evals = model.evaluate(eval_loader, threshold=0.5, pos_weight=3, device=device)
         print(f"Epoch {epoch+1}: loss={epoch_loss:.4f}  P/R/F1={evals['precision']:.3f}/{evals['recall']:.3f}/{evals['f1']:.3f}")

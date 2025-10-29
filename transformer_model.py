@@ -45,43 +45,46 @@ class CzecherTransformer(nn.Module):
         logits = self.head(h).squeeze(-1)
         return logits
     
-    def train_epoch(self, train_loader, weight = 8, device = 'cpu'):
+    def train_epoch(self, train_loader, eval_loader, weight = 8, device = 'cpu'):
         self.train()
         self.to(device)
+        micro_batch = 256
+        accum_steps = 4
+        effective_batch = accum_steps * micro_batch
 
         scaler = torch.amp.GradScaler(device)
         optimizer = AdamW(self.parameters(), lr=3e-4)  # 0.0002 ?
         loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(weight), device=device))
 
         total_loss = 0.0
-        total_batches = len(train_loader)
         ts = time.time()
-        for idx, batch in enumerate(train_loader, start=1):
+        for step, batch in enumerate(train_loader, start=1):
             inputs = batch['inputs'].to(device).long()
             labels = batch['labels'].to(device).float()
             optimizer.zero_grad(set_to_none=True)
+            mask = (inputs != self.pad_id)
 
-            if device == 'cuda':
-                with torch.amp.autocast(device_type=device, dtype=torch.float16):
-                    logits = self(inputs)
-                    mask = (inputs != self.pad_id)
-                    loss = loss_fn(logits[mask], labels[mask])
-            else:
+            with torch.amp.autocast(device_type=device, dtype=torch.float16):
                 logits = self(inputs)
-                mask = (inputs != self.pad_id)
                 loss = loss_fn(logits[mask], labels[mask])
+                # loss = loss / accum_steps
             
             scaler.scale(loss).backward()
+
+            # if step % accum_steps == 0:
+            scaler.unscale_(optimizer)
             scaler.step(optimizer)
             scaler.update()
             total_loss += float(loss.item())
             
         
         total_time = time.time() - ts
-        avg_batch_time = round(total_time / idx, 4)
+        avg_batch_time = round(total_time / step, 4)
         batches_per_second = round(1 / avg_batch_time, 4)
-        print(f'Trained epoch {idx} in {round(total_time, 2)}s - {batches_per_second} batches / second')
-    
+        print(f'Trained epoch {step} in {round(total_time, 2)}s - {batches_per_second} batches / second')
+        best = self.find_best_threshold(eval_loader, device=device)
+        print(f"Best threshold = {best['th']:.2f}  P={best['p']:.3f} R={best['r']:.3f} F1={best['f1']:.3f}")
+
         return total_loss / max(1, len(train_loader))
 
     
@@ -175,9 +178,10 @@ class CzecherTransformer(nn.Module):
         comma_idxs = torch.nonzero((probs >= threshold) & mask, as_tuple=False).flatten().tolist()
 
         # Subtract 1 because of BOS token
+        shifted_idxs = []
         for c_idx in comma_idxs:
-            c_idx -= 1
-        return comma_idxs, probs.detach().cpu().tolist()
+            shifted_idxs.append(c_idx - 1)
+        return shifted_idxs, probs.detach().cpu().tolist()
 
     @torch.no_grad()
     def punctuate(self, text: str, tokenizer, threshold: float = 0.5, device='cpu'):
@@ -195,3 +199,31 @@ class CzecherTransformer(nn.Module):
 
         punctuated = "".join(out)
         return punctuated
+    
+    @torch.no_grad()
+    def find_best_threshold(self, eval_loader, device="cpu"):
+        self.eval()
+        probs_all, labels_all, mask_all = [], [], []
+        for batch in eval_loader:
+            inputs = batch['inputs'].to(device).long()
+            labels = batch['labels'].to(device).float()
+            logits = self(inputs)
+            mask = inputs.ne(self.pad_id)
+            probs_all.append(torch.sigmoid(logits)[mask])
+            labels_all.append(labels[mask])
+        probs = torch.cat(probs_all)   # [N]
+        labels = torch.cat(labels_all) # [N] 0/1
+
+        best = {"th": 0.5, "f1": -1, "p": 0, "r": 0}
+        for th in torch.linspace(0.05, 0.95, 19, device=probs.device):
+            pred = probs >= th
+            tp = (pred & (labels > 0.5)).sum().item()
+            fp = (pred & (labels <= 0.5)).sum().item()
+            fn = ((~pred) & (labels > 0.5)).sum().item()
+            p  = tp / (tp + fp + 1e-12)
+            r  = tp / (tp + fn + 1e-12)
+            f1 = 2*p*r/(p+r+1e-12)
+            if f1 > best["f1"]:
+                best = {"th": float(th.item()), "f1": f1, "p": p, "r": r}
+        return best
+    
