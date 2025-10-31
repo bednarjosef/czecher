@@ -8,7 +8,7 @@ from torch.optim import AdamW
 
 
 class CzecherTransformer(nn.Module):
-    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 128, max_len: int = 512, d_model: int = 128, nhead: int = 4, num_layers: int = 2, dim_ff: int = 256, dropout: float = 0.1):
+    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 256, max_len: int = 512, d_model: int = 256, nhead: int = 4, num_layers: int = 5, dim_ff: int = 512, dropout: float = 0.1):
         super().__init__()
         self.pad_id = pad_id
         self.embed = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_id)
@@ -45,7 +45,7 @@ class CzecherTransformer(nn.Module):
         logits = self.head(h).squeeze(-1)
         return logits
     
-    def train_epoch(self, train_loader, eval_loader, weight = 8, device = 'cpu'):
+    def train_epoch(self, train_loader, eval_loader, weight = 1, device = 'cpu'):
         self.train()
         self.to(device)
         micro_batch = 256
@@ -53,9 +53,10 @@ class CzecherTransformer(nn.Module):
         effective_batch = accum_steps * micro_batch
 
         scaler = torch.amp.GradScaler(device)
-        optimizer = AdamW(self.parameters(), lr=3e-4)  # 0.0002 ?
+        optimizer = AdamW(self.parameters(), lr=3e-3)  # 0.0002 ?
         loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(weight), device=device))
 
+        steps = len(train_loader)
         total_loss = 0.0
         ts = time.time()
         for step, batch in enumerate(train_loader, start=1):
@@ -76,12 +77,14 @@ class CzecherTransformer(nn.Module):
             scaler.step(optimizer)
             scaler.update()
             total_loss += float(loss.item())
+            t = time.time() - ts
+            print(f'Finished step {step}/{steps} - {round(step / t, 2)} steps/second')
             
         
         total_time = time.time() - ts
-        avg_batch_time = round(total_time / step, 4)
-        batches_per_second = round(1 / avg_batch_time, 4)
-        print(f'Trained epoch in {round(total_time, 2)}s - {batches_per_second} batches / second')
+        avg_step_time = round(total_time / step, 4)
+        steps_per_second = round(1 / avg_step_time, 4)
+        print(f'Trained epoch in {round(total_time, 2)}s - {steps_per_second} steps / second')
         best = self.find_best_threshold(eval_loader, device=device)
         print(f"Best threshold = {best['th']:.2f}  P={best['p']:.3f} R={best['r']:.3f} F1={best['f1']:.3f}")
 
@@ -99,7 +102,7 @@ class CzecherTransformer(nn.Module):
         print(f'Model saved to {path}.')
 
     @classmethod
-    def load(cls, path: str = 'model.pt', map_location: Optional[str | torch.device] = None) -> "CommaModel":
+    def load(cls, path: str = 'model.pt', map_location: Optional[str | torch.device] = None):
         ckpt = torch.load(path, map_location=map_location)
         config = ckpt["config"]
         model = cls(**config)

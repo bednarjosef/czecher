@@ -6,8 +6,7 @@ from pathlib import Path
 
 MIN_LEN = 20
 MAX_LEN = 512
-TARGET_SENTENCES = 500_000 + 8
-N_PAGES = 10_000
+TARGET_SENTENCES = 5_000_000 + 8
 
 
 def save_sentences(sentences, path="sentences.txt"):
@@ -57,4 +56,4 @@ def download_wiki_sentences():
 
 if __name__ == '__main__':
     sentences = download_wiki_sentences()
-    save_sentences(sentences, 'data/sentences.txt')
+    save_sentences(sentences, 'data/sentences_5M.txt')

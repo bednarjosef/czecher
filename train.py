@@ -1,8 +1,9 @@
 import torch
 from torch.utils.data import DataLoader
-from char_tokenizer import CharTokenizer
+from czecher_tokenizers.char_tokenizer import CharTokenizer
 from cnn_model import CzecherCNN
 from dataset import CommaDataset
+from transformer_model import CzecherTransformer
 
 
 def collate(batch):
@@ -11,7 +12,7 @@ def collate(batch):
     return { 'inputs': inputs, 'labels': labels }
 
 
-def train_model(model: CzecherCNN, dataset: CommaDataset, epochs: int, batch_size: int = 64):
+def train_model(model: CzecherTransformer, dataset: CommaDataset, epochs: int, batch_size: int = 64):
     print(f'Creating splits...')
     split = int(0.90 * len(dataset))
     train_ds, dev_ds = torch.utils.data.random_split(dataset, [split, len(dataset)-split])
@@ -25,7 +26,8 @@ def train_model(model: CzecherCNN, dataset: CommaDataset, epochs: int, batch_siz
     model = model.to(device)
 
     print(f'Beginning training...')
+    w = 8
     for epoch in range(epochs):
-        epoch_loss = model.train_epoch(train_loader, eval_loader, 8, device)
-        evals = model.evaluate(eval_loader, threshold=0.5, pos_weight=3, device=device)
+        epoch_loss = model.train_epoch(train_loader, eval_loader, weight=w, device=device)
+        evals = model.evaluate(eval_loader, threshold=0.5, pos_weight=w, device=device)
         print(f"Epoch {epoch+1}: loss={epoch_loss:.4f}  P/R/F1={evals['precision']:.3f}/{evals['recall']:.3f}/{evals['f1']:.3f}")
