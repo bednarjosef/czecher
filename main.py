@@ -45,12 +45,31 @@ def estimate_pos_weight(tokenizer: CharTokenizer, dataset, device="cpu"):
 
 def main():
     print('Hello world!')
-    # sentences = load_sentences(path='data/sentences_500k.txt')
-    # tokenizer = GPTTokenizer().build_vocabulary(sentences, 'gpt_tokenizer/vocabulary.csv')
-    # dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/dataset.csv', max_len=512)
-
     tokenizer = GPTTokenizer(json_file='tokenizer.json')
-    dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
+    sentences = load_sentences(path='data/sentences_500k.txt')
+    dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/bpe/dataset_500k.csv', max_tokens=128)
+
+    # dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
+    # point = dataset[394]
+    # tokens = point['sentence']
+    # commas = point['commas']
+    # strs = []
+    # for token_id in tokens:
+    #     tok_str = tokenizer.detokenize([token_id])
+    #     strs.append(tok_str)
+    # final = "|".join(strs)
+    # print(tokens)
+    # print(final)
+    # print(commas)
+    # commad = ''
+    # for idx, cm in enumerate(commas):
+    #     commad = commad + tokenizer.detokenize([tokens[idx]])
+    #     if cm == 1:
+    #         commad = commad + ','
+    # print(commad)
+            
+
+
     # dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/bpe/dataset_500k.csv', max_tokens=256)
 
     # tokens = tokenizer.tokenize('Kdyz jsem prisel domu, bylo mi fajn (ale ne moc), a zaroven jsem vubec nevedel, kdy uz prijdou rodice.', max_tokens=256)
@@ -65,9 +84,9 @@ def main():
     # dataset = CommaDataset().load_dataset('data/dataset.csv')
     # pos = estimate_pos_weight(tokenizer, dataset, 'cpu')
     # print(pos)
-    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256)
-    train_model(model, dataset, epochs=5, batch_size=256)
-    model.save('data/500k_model1.pt')
+    # model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256)
+    # train_model(model, dataset, epochs=5, batch_size=256)
+    #model.save('data/500k_model1.pt')
     # model = model.load('data/transformer_model7.pt')
     # text = "V roce 1971 pak Salivarová a Škvorecký založili nakladatelství '68 Publishers kde pak vydávali především české knihy které nemohly vycházet v komunistickém Československu."
     # correct_sentence(text, model, tokenizer)

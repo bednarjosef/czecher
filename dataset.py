@@ -4,6 +4,8 @@ from torch.utils.data import Dataset, DataLoader
 from czecher_tokenizers.tokenizer import Tokenizer
 import random
 
+COMMA = ','
+
 
 class CommaDataset(Dataset):
     def __init__(self):
@@ -26,20 +28,35 @@ class CommaDataset(Dataset):
         return self[random.randint(0, len(self))]
     
     def get_data_pair(self, sentence: str, max_tokens: int):
-        formatted = sentence.replace(',', '')
+        # TODO: FIX TOKENIZATION IS DIFFERENT DEPENDING ON WHETHER THERE IS THE COMMA -> TOKENIZE ONLY SENTENCE WITHOUT COMMAS, LOOP THROUGH TOKENS, COUNT CHARS AND IF EQUAL TO CHARS BEFORE EACH COMMA, SET PROBABILITY TO 1
+        formatted = sentence.replace(COMMA, '')
         in_tokens = self.tokenizer.tokenize(formatted, max_tokens=max_tokens)
 
         probabilities = [0] * max_tokens
         commas_found = 0
+        chars_decoded = 0
 
-        raw_tokens = self.tokenizer.tokenize(formatted, max_tokens=max_tokens)
-        for idx, token_id in enumerate(raw_tokens):
-            token = self.tokenizer.detokenize([token_id])
-            if token != ',':
+        for idx, token_id in enumerate(in_tokens):
+            token = self.tokenizer.detokenize([token_id])  # detokenization already doesn't include special chars (BOS, EOS, PAD)
+            chars_decoded += len(token)
+            if chars_decoded + commas_found >= len(sentence):
+                break
+            original_next_char = sentence[chars_decoded + commas_found]
+            if original_next_char != COMMA:
                 continue
-            probabilities[idx - commas_found - 1] = 1  # the probability of the previous token being followed by a ',' is 1
+            probabilities[idx] = 1  # NOT: -1 because .tokenize() adds the BOS token but .detokenize() doesn't return it - .detokenize() is used for inference
             commas_found += 1
+
         return in_tokens, probabilities
+
+        # raw_tokens = self.tokenizer.tokenize(formatted, max_tokens=max_tokens)
+        # for idx, token_id in enumerate(raw_tokens):
+        #     token = self.tokenizer.detokenize([token_id])
+        #     if token != COMMA:
+        #         continue
+        #     probabilities[idx - commas_found - 1] = 1  # the probability of the previous token being followed by a ',' is 1
+        #     commas_found += 1
+        # return in_tokens, probabilities
 
         # for idx, char in enumerate(sentence):
         #     if char != ',':
