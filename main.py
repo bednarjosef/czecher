@@ -14,7 +14,9 @@ def load_sentences(path="sentences.txt"):
     return [line.rstrip("\n") for line in Path(path).read_text(encoding="utf-8").splitlines()]
 
 def correct_sentence(text, model, tokenizer):
-    punctuated = model.punctuate(text, tokenizer, threshold=0.5)
+    punctuated = model.punctuate(text, tokenizer, threshold=0.8)
+
+
     print("INPUT: ", text)
     print("OUTPUT:", punctuated)
 
@@ -84,12 +86,12 @@ def main():
     # dataset = CommaDataset().load_dataset('data/dataset.csv')
     # pos = estimate_pos_weight(tokenizer, dataset, 'cpu')
     # print(pos)
-    # model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256)
+    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256)
     # train_model(model, dataset, epochs=5, batch_size=256)
-    #model.save('data/500k_model1.pt')
-    # model = model.load('data/transformer_model7.pt')
-    # text = "V roce 1971 pak Salivarová a Škvorecký založili nakladatelství '68 Publishers kde pak vydávali především české knihy které nemohly vycházet v komunistickém Československu."
-    # correct_sentence(text, model, tokenizer)
+    # model.save('data/500k_model1.pt')
+    model = model.load('data/500k_model3.pt')
+    text = "V roce 1971 pak Salivarová a Škvorecký založili nakladatelství '68 Publishers kde pak vydávali především české knihy které nemohly vycházet v komunistickém Československu."
+    correct_sentence(text, model, tokenizer)
 
 
 if __name__ == '__main__':

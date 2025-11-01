@@ -1,6 +1,7 @@
 import os
 import time
 from typing import Optional
+from czecher_tokenizers.tokenizer import Tokenizer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -135,7 +136,7 @@ class CzecherTransformer(nn.Module):
             inputs = batch['inputs'].to(device).long()
             labels = batch['labels'].to(device).float()
 
-            logits = self(inputs)                  # [B, 512] (or [B, 1])
+            logits = self(inputs)
             mask = (inputs != self.pad_id)
 
             loss = loss_fn(logits[mask], labels[mask])
@@ -181,27 +182,34 @@ class CzecherTransformer(nn.Module):
         comma_idxs = torch.nonzero((probs >= threshold) & mask, as_tuple=False).flatten().tolist()
 
         # Subtract 1 because of BOS token
-        shifted_idxs = []
-        for c_idx in comma_idxs:
-            shifted_idxs.append(c_idx - 1)
-        return shifted_idxs, probs.detach().cpu().tolist()
+        # shifted_idxs = []
+        # for c_idx in comma_idxs:
+        #     shifted_idxs.append(c_idx - 1)
+        return comma_idxs, probs.detach().cpu().tolist()
 
     @torch.no_grad()
-    def punctuate(self, text: str, tokenizer, threshold: float = 0.5, device='cpu'):
+    def punctuate(self, text: str, tokenizer: Tokenizer, threshold: float = 0.5, device='cpu'):
         """Return a corrected sentence."""
-        ids = tokenizer.tokenize(text)
+        ids = tokenizer.tokenize(text, max_tokens=128)
         comma_idxs, probs = self.predict_comma_ids(ids, threshold=threshold, device=device)
-        out = []
-        T = len(text)
-        comma_set = set(comma_idxs)
 
-        for i, ch in enumerate(text):
-            out.append(ch)
-            if i in comma_set:
-                out.append(",")
+        commad = ''
+        for idx, comma_prob in enumerate(probs):
+            commad = commad + tokenizer.detokenize([ids[idx]])
+            if comma_prob >= threshold:
+                commad = commad + ','
 
-        punctuated = "".join(out)
-        return punctuated
+        # out = []
+        # T = len(text)
+        # comma_set = set(comma_idxs)
+
+        # for i, ch in enumerate(text):
+        #     out.append(ch)
+        #     if i in comma_set:
+        #         out.append(",")
+
+        # punctuated = "".join(out)
+        return commad
     
     @torch.no_grad()
     def find_best_threshold(self, eval_loader, device="cpu"):
