@@ -29,9 +29,6 @@ def get_data_pair(sentence: str, tokenizer: Tokenizer, max_tokens: int) -> Tuple
 
     # Walk token-by-token; detokenize piece-by-piece
     for idx, token_id in enumerate(in_tokens):
-        if token_id == 0:
-            # padding token; stop early
-            break
         token = tokenizer.detokenize([token_id])   # assumed to return piece without special tokens
         chars_decoded += len(token)
         if chars_decoded + commas_found >= len(sentence):

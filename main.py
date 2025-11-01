@@ -59,7 +59,7 @@ def main():
 
     tokenizer = GPTTokenizer(json_file='tokenizer.json')
     # dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
-    dataset = CommaMemmapDataset("./comma_memmap/inputs.bin", "./comma_memmap/labels.bin", max_tokens=128)
+    dataset = CommaMemmapDataset("./comma_memmap/inputs.bin", "./comma_memmap/labels.bin", max_tokens=128, pad_id=tokenizer.get_pad_token_id())
     model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256, num_layers=layers)
     # model = model.load('data/trained_models/500k_model7.pt')
 

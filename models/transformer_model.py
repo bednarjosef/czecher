@@ -95,8 +95,8 @@ class CzecherTransformer(nn.Module):
         train_ds, eval_ds = torch.utils.data.random_split(dataset, [split, len(dataset)-split])
 
         print(f'Creating DataLoaders...')
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2)
-        eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True, persistent_workers=True)
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0)
+        eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False, num_workers=0)
 
         print(f'Loading model and optimizer...')
         device = "cuda" if torch.cuda.is_available() else "cpu"
