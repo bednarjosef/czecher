@@ -5,6 +5,7 @@ from typing import Optional
 
 from czecher_tokenizers.tokenizer import Tokenizer
 from dataset import CommaDataset
+from utils.train_logger import log_step_wandb
 
 
 class CzecherTransformer(nn.Module):
@@ -32,6 +33,7 @@ class CzecherTransformer(nn.Module):
             dim_ff=dim_ff,
             dropout=dropout,
         )
+        self.to("cuda" if torch.cuda.is_available() else "cpu")
     
     def forward(self, input_ids):
         B, T = input_ids.shape
@@ -45,8 +47,8 @@ class CzecherTransformer(nn.Module):
         logits = self.head(h).squeeze(-1)
         return logits
     
-    def train_model(self, dataset: CommaDataset, epochs: int, batch_size: int = 256, lr: float = 2e-4, pos_weight: float = 3, print_steps: int = 300) -> tuple[float, list]:
-        ts = time.time()
+    def train_model(self, dataset: CommaDataset, epochs: int, batch_size: int = 256, lr: float = 2e-4, pos_weight: float = 3, log_every: int = 300, log_fn: function = None) -> tuple[float, list]:
+        train_start = time.time()
         progress = []
 
         print(f'Creating splits...')
@@ -62,18 +64,19 @@ class CzecherTransformer(nn.Module):
         self.to(device)
 
         print(f'Beginning training...')
-        for epoch in range(epochs):
+        global_steps = 0
+        for epoch in range(1, epochs+1, 1):
             ts = time.time()
-            epoch_loss = self.train_epoch(train_loader, lr=lr, pos_weight=pos_weight, device=device, print_every=print_steps)
-            best_eval = self.get_best_eval(eval_loader, device=device)
-            best_eval['loss'] = epoch_loss
+            best_eval, global_steps = self.train_epoch(global_steps, train_loader, eval_loader, lr=lr, pos_weight=pos_weight, device=device, log_every=log_every, log_fn=log_fn)
+            best_eval['epoch'] = epoch
+            log_fn(best_eval)
             progress.append(best_eval)
-            print(f"Epoch {epoch+1} - {round(time.time() - ts, 2)}s: loss={epoch_loss:.4f} best_threshold={best_eval['threshold']:.2f} | P/R/F1={best_eval['precision']:.3f}/{best_eval['recall']:.3f}/{best_eval['f1']:.3f}")
+            print(f"Epoch {epoch} - {round(time.time() - ts, 2)} seconds: loss={best_eval['train/loss']:.4f} best_threshold={best_eval['eval/best_threshold']:.2f} | P/R/F1={best_eval['eval/precision']:.3f}/{best_eval['eval/recall']:.3f}/{best_eval['f1']:.3f}")
 
-        print(f'Training {epochs} epochs complete in {round(time.time() - ts)} seconds.')
-        return best_eval['th'], progress
+        print(f'Training {epochs} epochs complete in {round(time.time() - train_start)} seconds.')
+        return best_eval['eval/best_threshold'], progress
     
-    def train_epoch(self, train_loader: DataLoader, lr: float = 2e-4, pos_weight: float = 1, device = 'cuda', print_every: int = 300):
+    def train_epoch(self, global_steps: int, train_loader: DataLoader, eval_loader: DataLoader, lr: float = 2e-4, pos_weight: float = 1, device = 'cuda', log_every: int = 300, log_fn: function = None) -> tuple[dict, int]:
         self.train()
         self.to(device)
 
@@ -100,11 +103,18 @@ class CzecherTransformer(nn.Module):
             scaler.step(optimizer)
             scaler.update()
             total_loss += float(loss.item())
-            if print_every and step % print_every == 0:
-                t = time.time() - ts
-                print(f'Finished step {step}/{steps} - {round(step / t, 2)} steps/second')
+            global_steps += 1
+            if log_every and global_steps % log_every == 0:
+                best_eval = self.get_best_eval(eval_loader, device=device)
+                print(f'Finished {step}/{steps} steps in epoch - {round(step / (time.time() - ts), 2)} steps/second ({global_steps} total steps)')
+                log_fn(best_eval, step=global_steps)
+                ts = time.time()
         
-        return total_loss / max(1, len(train_loader))
+
+        best_eval = self.get_best_eval(eval_loader, device=device)
+        best_eval['train/loss'] = total_loss / max(1, len(train_loader))
+
+        return best_eval, global_steps
 
     
     def save(self, path: str = 'model.pt') -> None:
@@ -125,63 +135,7 @@ class CzecherTransformer(nn.Module):
         model.load_state_dict(ckpt["state_dict"], strict=True)
         print(f'Model loaded from {path}.')
         return model
-    
-    @torch.no_grad()
-    def evaluate(self, eval_loader, threshold: float = 0.5, pos_weight=None, device=None):
-        self.eval()
 
-        if device is None:
-            device = next(self.parameters()).device
-
-        if pos_weight is not None:
-            if isinstance(pos_weight, (float, int)):
-                pos_weight = torch.tensor(float(pos_weight), device=device)
-            loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        else:
-            loss_fn = nn.BCEWithLogitsLoss()
-
-        total_loss = 0.0
-        n_batches = 0
-
-        tp = fp = fn = tn = 0
-
-        for batch in eval_loader:
-            inputs = batch['inputs'].to(device).long()
-            labels = batch['labels'].to(device).float()
-
-            logits = self(inputs)
-            mask = (inputs != self.pad_id)
-
-            loss = loss_fn(logits[mask], labels[mask])
-            total_loss += float(loss.item())
-            n_batches += 1
-
-            probs = torch.sigmoid(logits)
-            preds = (probs >= threshold) & mask
-            y_true = (labels >= 0.5).bool() & mask
-
-            tp += (preds &  y_true).sum().item()
-            fp += (preds & ~y_true).sum().item()
-            fn += (~preds &  y_true).sum().item()
-            tn += (~preds & ~y_true).sum().item()
-
-        precision = tp / (tp + fp + 1e-12)
-        recall    = tp / (tp + fn + 1e-12)
-        f1        = 2 * precision * recall / (precision + recall + 1e-12)
-        accuracy  = (tp + tn) / max(1, (tp + tn + fp + fn))
-
-        avg_loss = total_loss / max(1, n_batches)
-
-        return {
-            'loss': avg_loss,
-            'accuracy': accuracy,
-            'precision': precision,
-            'recall': recall,
-            'f1': f1,
-            'tp': tp, 'fp': fp, 'fn': fn, 'tn': tn,
-            'threshold': threshold,
-        }
-    
     @torch.no_grad()
     def predict_logits(self, input_ids, device=None):
         if device is None:
@@ -195,14 +149,14 @@ class CzecherTransformer(nn.Module):
     def predict_probs(self, input_ids, device=None):
         logits, mask = self.predict_logits(input_ids, device)
         probs = torch.sigmoid(logits)
-        return probs, mask
+        return probs.tolist(), mask
 
     @torch.no_grad()
-    def punctuate(self, text: str, tokenizer: Tokenizer, threshold: float = 0.5, device='cpu'):
+    def punctuate(self, text: str, tokenizer: Tokenizer, threshold: float = 0.5, device='cuda'):
         ## TODO: add option if threshold='best' to use from self.get_best_eval()
         """Return a corrected sentence."""
         token_ids = tokenizer.tokenize(text, max_tokens=128)
-        probs = self.predict_probs(token_ids, threshold, device)
+        probs, _mask = self.predict_probs(token_ids, device)
 
         punctuated = ''
         for idx, comma_prob in enumerate(probs):
@@ -225,7 +179,7 @@ class CzecherTransformer(nn.Module):
         probs = torch.cat(probs_all)   # [N]
         labels = torch.cat(labels_all) # [N] 0/1
 
-        best = { "threshold": 0.5, "f1": -1, "precision": 0, "recall": 0 }
+        best = { "eval/best_threshold": 0.5, "eval/f1": -1, "eval/precision": 0, "eval/recall": 0 }
         for th in torch.linspace(0.05, 0.95, 19, device=probs.device):
             pred = probs >= th
             tp = (pred & (labels > 0.5)).sum().item()
@@ -234,8 +188,8 @@ class CzecherTransformer(nn.Module):
             p  = tp / (tp + fp + 1e-12)
             r  = tp / (tp + fn + 1e-12)
             f1 = 2*p*r/(p+r+1e-12)
-            if f1 > best["f1"]:
-                best = { "threshold": float(th.item()), "f1": f1, "precision": p, "recall": r }
+            if f1 > best["eval/f1"]:
+                best = { "eval/best_threshold": round(float(th.item()), 4), "eval/f1": round(f1, 4), "eval/precision": round(p, 4), "eval/recall": round(r, 4) }
         return best
     
 

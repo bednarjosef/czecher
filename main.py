@@ -1,11 +1,12 @@
-from pathlib import Path
+import torch, wandb
+
+from torch.utils.data import DataLoader
+
 from dataset import CommaDataset
+from models.transformer_model import CzecherTransformer
 from czecher_tokenizers.bpe_tokenizer import GPTTokenizer
 from czecher_tokenizers.char_tokenizer import CharTokenizer
 from utils.download_wiki_texts import load_sentences
-from models.transformer_model import CzecherTransformer
-import torch
-from torch.utils.data import DataLoader
 
 
 def collate(batch):
@@ -34,16 +35,34 @@ def estimate_pos_weight(tokenizer: CharTokenizer, dataset, device="cpu"):
 
 
 def main():
+    epochs = 5
+    batch_size = 256
+    lr = 2e-4
+    pos_weight = 1
+
+    run = wandb.init(
+        entity="czecher-team",
+        project="czecher-commas",
+        config={
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "learning_rate": lr,
+            "pos_weight": pos_weight,
+            "architecture": "Transformer",
+            "dataset": "dataset_500k"
+        }
+    )
+
     tokenizer = GPTTokenizer(json_file='tokenizer.json')
     dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
     model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256).load('data/500k_model3.pt')
 
-    best_threshold, progress = model.train_model(dataset, epochs=5, batch_size=256, lr=2e-4, pos_weight=1, print_steps=300)
+    best_threshold, progress = model.train_model(dataset, epochs=epochs, batch_size=batch_size, lr=lr, pos_weight=pos_weight, log_every=300, log_fn=run.log)
     model.save('data/trained_models/500k_model5.pt')
     # model = model.load('data/500k_model3.pt')
 
     text = "V roce 1971 pak Salivarová a Škvorecký založili nakladatelství '68 Publishers kde pak vydávali především české knihy které nemohly vycházet v komunistickém Československu."
-    corrected = model.punctuate(text, tokenizer, threshold=best_threshold)
+    corrected = model.punctuate(text, tokenizer, threshold=best_threshold, device=None)
     print(text)
     print(corrected)
 
