@@ -28,7 +28,6 @@ class CommaDataset(Dataset):
         return self[random.randint(0, len(self))]
     
     def get_data_pair(self, sentence: str, max_tokens: int):
-        # TODO: FIX TOKENIZATION IS DIFFERENT DEPENDING ON WHETHER THERE IS THE COMMA -> TOKENIZE ONLY SENTENCE WITHOUT COMMAS, LOOP THROUGH TOKENS, COUNT CHARS AND IF EQUAL TO CHARS BEFORE EACH COMMA, SET PROBABILITY TO 1
         formatted = sentence.replace(COMMA, '')
         in_tokens = self.tokenizer.tokenize(formatted, max_tokens=max_tokens)
 
@@ -48,22 +47,6 @@ class CommaDataset(Dataset):
             commas_found += 1
 
         return in_tokens, probabilities
-
-        # raw_tokens = self.tokenizer.tokenize(formatted, max_tokens=max_tokens)
-        # for idx, token_id in enumerate(raw_tokens):
-        #     token = self.tokenizer.detokenize([token_id])
-        #     if token != COMMA:
-        #         continue
-        #     probabilities[idx - commas_found - 1] = 1  # the probability of the previous token being followed by a ',' is 1
-        #     commas_found += 1
-        # return in_tokens, probabilities
-
-        # for idx, char in enumerate(sentence):
-        #     if char != ',':
-        #         continue
-        #     probabilities[idx - commas_found] = 1  # +1 is for BOS token
-        #     commas_found += 1
-        # return in_tokens, probabilities
     
     def save_dataset(self, csv_path: str):
         print(f'Saving dataset to {csv_path}...')

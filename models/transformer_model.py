@@ -35,7 +35,7 @@ class CzecherTransformer(nn.Module):
         )
         self.to("cuda" if torch.cuda.is_available() else "cpu")
 
-    def _checkpoint_payload(self, optimizer=None, scaler=None, epoch=0, global_steps=0, best_f1=None, best_threshold=None, extra: dict | None = None):
+    def _checkpoint_payload(self, optimizer=None, scaler=None, epoch=0, global_steps=0, best_f1=None, extra: dict | None = None):
         return {
             "format": "CommaModel.v1",
             "config": self._config,
@@ -45,7 +45,6 @@ class CzecherTransformer(nn.Module):
             "epoch": epoch,
             "global_steps": global_steps,
             "best_f1": best_f1,
-            "best_threshold": best_threshold,
             "extra": extra or {},
             # Optional: RNG states for full determinism
             "rng": {
@@ -54,9 +53,9 @@ class CzecherTransformer(nn.Module):
             }
         }
 
-    def save_checkpoint(self, path: str, optimizer=None, scaler=None, epoch=0, global_steps=0, best_f1=None, best_threshold=None, extra: dict | None = None):
+    def save_checkpoint(self, path: str, optimizer=None, scaler=None, epoch=0, global_steps=0, best_f1=None, extra: dict | None = None):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        torch.save(self._checkpoint_payload(optimizer, scaler, epoch, global_steps, best_f1, best_threshold, extra), path)
+        torch.save(self._checkpoint_payload(optimizer, scaler, epoch, global_steps, best_f1, extra), path)
         print(f"[ckpt] Saved checkpoint → {path}")
 
     @classmethod
@@ -69,7 +68,6 @@ class CzecherTransformer(nn.Module):
             "epoch": ckpt.get("epoch", 0),
             "global_steps": ckpt.get("global_steps", 0),
             "best_f1": ckpt.get("best_f1", None),
-            "best_threshold": ckpt.get("best_threshold", None),
             "extra": ckpt.get("extra", {}),
         }
         return model, ckpt.get("optimizer"), ckpt.get("scaler"), meta
@@ -87,7 +85,7 @@ class CzecherTransformer(nn.Module):
         logits = self.head(h).squeeze(-1)
         return logits
     
-    def train_model(self, dataset: CommaDataset, epochs: int, batch_size: int = 256, lr: float = 2e-4, pos_weight: float = 3, log_every: int = 300, log_fn = None, save_every_steps: int | None = 5000, resume_from: str | None = None) -> tuple[float, list]:
+    def train_model(self, dataset, epochs: int, batch_size: int = 256, lr: float = 2e-4, pos_weight: float = 3, log_every: int = 300, log_fn = None, save_every_steps: int | None = 5000, resume_from: str | None = None) -> tuple[float, list]:
         train_start = time.time()
         progress = []
         ckpt_dir = 'checkpoints'
@@ -97,8 +95,8 @@ class CzecherTransformer(nn.Module):
         train_ds, eval_ds = torch.utils.data.random_split(dataset, [split, len(dataset)-split])
 
         print(f'Creating DataLoaders...')
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate)
-        eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False, collate_fn=collate)
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True, prefetch_factor=2)
+        eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True, persistent_workers=True)
 
         print(f'Loading model and optimizer...')
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -120,7 +118,6 @@ class CzecherTransformer(nn.Module):
             start_epoch = int(meta.get("epoch", 0)) + 1
             global_steps = int(meta.get("global_steps", 0))
             best_f1 = float(meta.get("best_f1", -1.0))
-            best_threshold = float(meta.get("best_threshold", 0.5))
 
         print(f'Beginning training...')
         global_steps = 0
@@ -136,14 +133,14 @@ class CzecherTransformer(nn.Module):
                 self.save_checkpoint(
                     os.path.join(ckpt_dir, "best.pt"),
                     optimizer=optimizer, scaler=scaler,
-                    epoch=epoch, global_steps=global_steps, best_f1=best_f1, best_threshold=best_threshold
+                    epoch=epoch, global_steps=global_steps, best_f1=best_f1
                 )
 
             # Always save "last.pt" at end of epoch
             self.save_checkpoint(
                 os.path.join(ckpt_dir, "last.pt"),
                 optimizer=optimizer, scaler=scaler,
-                epoch=epoch, global_steps=global_steps, best_f1=best_f1, best_threshold=best_threshold
+                epoch=epoch, global_steps=global_steps, best_f1=best_f1
             )
 
             print(f"Epoch {epoch} - {round(time.time() - ts, 2)} seconds: loss={best_eval['train/loss']:.4f} best_threshold={best_eval['eval/best_threshold']:.2f} | P/R/F1={best_eval['eval/precision']:.3f}/{best_eval['eval/recall']:.3f}/{best_eval['eval/f1']:.3f}")

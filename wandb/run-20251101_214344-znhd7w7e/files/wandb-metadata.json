@@ -1,0 +1,17 @@
+{
+  "os":  "Linux-6.14.0-33-generic-x86_64-with-glibc2.39",
+  "python":  "CPython 3.12.3",
+  "startedAt":  "2025-11-01T20:43:44.506121Z",
+  "program":  "/home/josef/everything/coding/czecher/main.py",
+  "codePath":  "main.py",
+  "codePathLocal":  "main.py",
+  "git":  {
+    "remote":  "https://github.com/bednarjosef/czecher.git",
+    "commit":  "d3af6503f60233447f6334a790aef42fbee390f0"
+  },
+  "email":  "josef.bednar@mensa.cz",
+  "root":  "/home/josef/everything/coding/czecher",
+  "host":  "lenovo",
+  "executable":  "/home/josef/everything/coding/czecher/.venv/bin/python3",
+  "writerId":  "j8g64c9sfrl4a2pni7iqi4a3a2w3h9a8"
+}
