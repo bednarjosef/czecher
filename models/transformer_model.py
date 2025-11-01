@@ -34,6 +34,46 @@ class CzecherTransformer(nn.Module):
             dropout=dropout,
         )
         self.to("cuda" if torch.cuda.is_available() else "cpu")
+
+    def _checkpoint_payload(self, optimizer=None, scaler=None, epoch=0, global_steps=0, best_f1=None, best_threshold=None, extra: dict | None = None):
+        return {
+            "format": "CommaModel.v1",
+            "config": self._config,
+            "state_dict": self.state_dict(),
+            "optimizer": optimizer.state_dict() if optimizer is not None else None,
+            "scaler": scaler.state_dict() if (scaler is not None) else None,
+            "epoch": epoch,
+            "global_steps": global_steps,
+            "best_f1": best_f1,
+            "best_threshold": best_threshold,
+            "extra": extra or {},
+            # Optional: RNG states for full determinism
+            "rng": {
+                "torch": torch.get_rng_state(),
+                "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            }
+        }
+
+    def save_checkpoint(self, path: str, optimizer=None, scaler=None, epoch=0, global_steps=0, best_f1=None, best_threshold=None, extra: dict | None = None):
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        torch.save(self._checkpoint_payload(optimizer, scaler, epoch, global_steps, best_f1, best_threshold, extra), path)
+        print(f"[ckpt] Saved checkpoint → {path}")
+
+    @classmethod
+    def load_checkpoint(cls, path: str, map_location: str | torch.device = "cpu"):
+        """Returns (model, optimizer_state_dict, scaler_state_dict, meta_dict)"""
+        ckpt = torch.load(path, map_location=map_location)
+        model = cls(**ckpt["config"])
+        model.load_state_dict(ckpt["state_dict"], strict=True)
+        meta = {
+            "epoch": ckpt.get("epoch", 0),
+            "global_steps": ckpt.get("global_steps", 0),
+            "best_f1": ckpt.get("best_f1", None),
+            "best_threshold": ckpt.get("best_threshold", None),
+            "extra": ckpt.get("extra", {}),
+        }
+        return model, ckpt.get("optimizer"), ckpt.get("scaler"), meta
+
     
     def forward(self, input_ids):
         B, T = input_ids.shape
@@ -47,9 +87,10 @@ class CzecherTransformer(nn.Module):
         logits = self.head(h).squeeze(-1)
         return logits
     
-    def train_model(self, dataset: CommaDataset, epochs: int, batch_size: int = 256, lr: float = 2e-4, pos_weight: float = 3, log_every: int = 300, log_fn: function = None) -> tuple[float, list]:
+    def train_model(self, dataset: CommaDataset, epochs: int, batch_size: int = 256, lr: float = 2e-4, pos_weight: float = 3, log_every: int = 300, log_fn = None, save_every_steps: int | None = 5000, resume_from: str | None = None) -> tuple[float, list]:
         train_start = time.time()
         progress = []
+        ckpt_dir = 'checkpoints'
 
         print(f'Creating splits...')
         split = int(0.90 * len(dataset))
@@ -63,25 +104,57 @@ class CzecherTransformer(nn.Module):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self.to(device)
 
+        scaler = torch.amp.GradScaler(device)
+        optimizer = AdamW(self.parameters(), lr=lr)
+        best_f1 = -1.0
+        start_epoch = 1
+
+        if resume_from:
+            print(f"[ckpt] Resuming from {resume_from}")
+            model_loaded, opt_state, scaler_state, meta = self.load_checkpoint(resume_from, map_location=device)
+            self.load_state_dict(model_loaded.state_dict(), strict=True)
+            if opt_state is not None:
+                optimizer.load_state_dict(opt_state)
+            if scaler_state is not None and torch.cuda.is_available():
+                scaler.load_state_dict(scaler_state)
+            start_epoch = int(meta.get("epoch", 0)) + 1
+            global_steps = int(meta.get("global_steps", 0))
+            best_f1 = float(meta.get("best_f1", -1.0))
+            best_threshold = float(meta.get("best_threshold", 0.5))
+
         print(f'Beginning training...')
         global_steps = 0
-        for epoch in range(1, epochs+1, 1):
+        for epoch in range(start_epoch, epochs + 1):
             ts = time.time()
-            best_eval, global_steps = self.train_epoch(global_steps, train_loader, eval_loader, lr=lr, pos_weight=pos_weight, device=device, log_every=log_every, log_fn=log_fn)
-            best_eval['epoch'] = epoch
+            best_eval, global_steps = self.train_epoch(global_steps, train_loader, eval_loader, lr=lr, pos_weight=pos_weight, device=device, log_every=log_every, log_fn=log_fn, optimizer=optimizer, scaler=scaler, save_every_steps=save_every_steps, epoch=epoch, best_f1=best_f1)
             log_fn(best_eval)
             progress.append(best_eval)
-            print(f"Epoch {epoch} - {round(time.time() - ts, 2)} seconds: loss={best_eval['train/loss']:.4f} best_threshold={best_eval['eval/best_threshold']:.2f} | P/R/F1={best_eval['eval/precision']:.3f}/{best_eval['eval/recall']:.3f}/{best_eval['f1']:.3f}")
+
+            curr_f1 = best_eval["eval/f1"]
+            if curr_f1 > best_f1:
+                best_f1 = curr_f1
+                self.save_checkpoint(
+                    os.path.join(ckpt_dir, "best.pt"),
+                    optimizer=optimizer, scaler=scaler,
+                    epoch=epoch, global_steps=global_steps, best_f1=best_f1, best_threshold=best_threshold
+                )
+
+            # Always save "last.pt" at end of epoch
+            self.save_checkpoint(
+                os.path.join(ckpt_dir, "last.pt"),
+                optimizer=optimizer, scaler=scaler,
+                epoch=epoch, global_steps=global_steps, best_f1=best_f1, best_threshold=best_threshold
+            )
+
+            print(f"Epoch {epoch} - {round(time.time() - ts, 2)} seconds: loss={best_eval['train/loss']:.4f} best_threshold={best_eval['eval/best_threshold']:.2f} | P/R/F1={best_eval['eval/precision']:.3f}/{best_eval['eval/recall']:.3f}/{best_eval['eval/f1']:.3f}")
 
         print(f'Training {epochs} epochs complete in {round(time.time() - train_start)} seconds.')
         return best_eval['eval/best_threshold'], progress
     
-    def train_epoch(self, global_steps: int, train_loader: DataLoader, eval_loader: DataLoader, lr: float = 2e-4, pos_weight: float = 1, device = 'cuda', log_every: int = 300, log_fn: function = None) -> tuple[dict, int]:
+    def train_epoch(self, global_steps: int, train_loader: DataLoader, eval_loader: DataLoader, lr: float = 2e-4, pos_weight: float = 1, device = 'cuda', log_every: int = 300, log_fn = None, optimizer=None, scaler=None, save_every_steps=None, epoch=None, best_f1=None) -> tuple[dict, int]:
         self.train()
         self.to(device)
 
-        scaler = torch.amp.GradScaler(device)
-        optimizer = AdamW(self.parameters(), lr=lr)
         loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(pos_weight), device=device))
 
         steps = len(train_loader)
@@ -98,7 +171,6 @@ class CzecherTransformer(nn.Module):
                 loss = loss_fn(logits[mask], labels[mask])
             
             scaler.scale(loss).backward()
-
             scaler.unscale_(optimizer)
             scaler.step(optimizer)
             scaler.update()
@@ -106,14 +178,25 @@ class CzecherTransformer(nn.Module):
             global_steps += 1
             if log_every and global_steps % log_every == 0:
                 best_eval = self.get_best_eval(eval_loader, device=device)
+                best_eval['train/loss'] = total_loss / max(1, step)
+
                 print(f'Finished {step}/{steps} steps in epoch - {round(step / (time.time() - ts), 2)} steps/second ({global_steps} total steps)')
                 log_fn(best_eval, step=global_steps)
-                ts = time.time()
+            
+            if save_every_steps and (global_steps % save_every_steps == 0):
+                self.save_checkpoint(
+                    os.path.join('checkpoints', f"step_{global_steps}.pt"),
+                    optimizer=optimizer,
+                    scaler=scaler if device == 'cuda' else None,
+                    epoch=epoch,
+                    global_steps=global_steps,
+                    best_f1=best_f1,
+                )
         
 
         best_eval = self.get_best_eval(eval_loader, device=device)
-        best_eval['train/loss'] = total_loss / max(1, len(train_loader))
-
+        best_eval['train/loss'] = total_loss / max(1, steps)
+        # best_eval['epoch'] = epoch
         return best_eval, global_steps
 
     

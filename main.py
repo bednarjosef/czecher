@@ -40,6 +40,8 @@ def main():
     lr = 2e-4
     pos_weight = 1
 
+    layers = 7
+
     run = wandb.init(
         entity="czecher-team",
         project="czecher-commas",
@@ -48,6 +50,7 @@ def main():
             "batch_size": batch_size,
             "learning_rate": lr,
             "pos_weight": pos_weight,
+            "layers": layers,
             "architecture": "Transformer",
             "dataset": "dataset_500k"
         }
@@ -55,7 +58,7 @@ def main():
 
     tokenizer = GPTTokenizer(json_file='tokenizer.json')
     dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
-    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256).load('data/500k_model3.pt')
+    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256, num_layers=layers).load('data/500k_model3.pt')
 
     best_threshold, progress = model.train_model(dataset, epochs=epochs, batch_size=batch_size, lr=lr, pos_weight=pos_weight, log_every=300, log_fn=run.log)
     model.save('data/trained_models/500k_model5.pt')
