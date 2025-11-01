@@ -37,7 +37,7 @@ def estimate_pos_weight(tokenizer: CharTokenizer, dataset, device="cpu"):
 
 def main():
     epochs = 1
-    batch_size = 256
+    batch_size = 512
     lr = 2e-4
     pos_weight = 1
 

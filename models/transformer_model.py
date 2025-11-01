@@ -87,6 +87,10 @@ class CzecherTransformer(nn.Module):
     
     def train_model(self, dataset, epochs: int, batch_size: int = 256, lr: float = 2e-4, pos_weight: float = 3, log_every: int = 300, log_fn = None, save_every_steps: int | None = 5000, resume_from: str | None = None) -> tuple[float, list]:
         train_start = time.time()
+
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
         progress = []
         ckpt_dir = 'checkpoints'
 
@@ -169,6 +173,7 @@ class CzecherTransformer(nn.Module):
             
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
             scaler.step(optimizer)
             scaler.update()
             total_loss += float(loss.item())
