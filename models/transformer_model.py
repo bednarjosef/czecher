@@ -1,11 +1,10 @@
-import os
-import time
-from typing import Optional
-from czecher_tokenizers.tokenizer import Tokenizer
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import os, time, torch, torch.nn as nn
 from torch.optim import AdamW
+from torch.utils.data import DataLoader
+from typing import Optional
+
+from czecher_tokenizers.tokenizer import Tokenizer
+from dataset import CommaDataset
 
 
 class CzecherTransformer(nn.Module):
@@ -46,16 +45,41 @@ class CzecherTransformer(nn.Module):
         logits = self.head(h).squeeze(-1)
         return logits
     
-    def train_epoch(self, train_loader, eval_loader, weight = 1, device = 'cpu'):
+    def train_model(self, dataset: CommaDataset, epochs: int, batch_size: int = 256, lr: float = 2e-4, pos_weight: float = 3, print_steps: int = 300) -> tuple[float, list]:
+        ts = time.time()
+        progress = []
+
+        print(f'Creating splits...')
+        split = int(0.90 * len(dataset))
+        train_ds, eval_ds = torch.utils.data.random_split(dataset, [split, len(dataset)-split])
+
+        print(f'Creating DataLoaders...')
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate)
+        eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False, collate_fn=collate)
+
+        print(f'Loading model and optimizer...')
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.to(device)
+
+        print(f'Beginning training...')
+        for epoch in range(epochs):
+            ts = time.time()
+            epoch_loss = self.train_epoch(train_loader, lr=lr, pos_weight=pos_weight, device=device, print_every=print_steps)
+            best_eval = self.get_best_eval(eval_loader, device=device)
+            best_eval['loss'] = epoch_loss
+            progress.append(best_eval)
+            print(f"Epoch {epoch+1} - {round(time.time() - ts, 2)}s: loss={epoch_loss:.4f} best_threshold={best_eval['threshold']:.2f} | P/R/F1={best_eval['precision']:.3f}/{best_eval['recall']:.3f}/{best_eval['f1']:.3f}")
+
+        print(f'Training {epochs} epochs complete in {round(time.time() - ts)} seconds.')
+        return best_eval['th'], progress
+    
+    def train_epoch(self, train_loader: DataLoader, lr: float = 2e-4, pos_weight: float = 1, device = 'cuda', print_every: int = 300):
         self.train()
         self.to(device)
-        micro_batch = 256
-        accum_steps = 4
-        effective_batch = accum_steps * micro_batch
 
         scaler = torch.amp.GradScaler(device)
-        optimizer = AdamW(self.parameters(), lr=3e-3)  # 0.0002 ?
-        loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(weight), device=device))
+        optimizer = AdamW(self.parameters(), lr=lr)
+        loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(pos_weight), device=device))
 
         steps = len(train_loader)
         total_loss = 0.0
@@ -69,26 +93,17 @@ class CzecherTransformer(nn.Module):
             with torch.amp.autocast(device_type=device, dtype=torch.float16):
                 logits = self(inputs)
                 loss = loss_fn(logits[mask], labels[mask])
-                # loss = loss / accum_steps
             
             scaler.scale(loss).backward()
 
-            # if step % accum_steps == 0:
             scaler.unscale_(optimizer)
             scaler.step(optimizer)
             scaler.update()
             total_loss += float(loss.item())
-            t = time.time() - ts
-            print(f'Finished step {step}/{steps} - {round(step / t, 2)} steps/second')
-            
+            if print_every and step % print_every == 0:
+                t = time.time() - ts
+                print(f'Finished step {step}/{steps} - {round(step / t, 2)} steps/second')
         
-        total_time = time.time() - ts
-        avg_step_time = round(total_time / step, 4)
-        steps_per_second = round(1 / avg_step_time, 4)
-        print(f'Trained epoch in {round(total_time, 2)}s - {steps_per_second} steps / second')
-        best = self.find_best_threshold(eval_loader, device=device)
-        print(f"Best threshold = {best['th']:.2f}  P={best['p']:.3f} R={best['r']:.3f} F1={best['f1']:.3f}")
-
         return total_loss / max(1, len(train_loader))
 
     
@@ -118,7 +133,6 @@ class CzecherTransformer(nn.Module):
         if device is None:
             device = next(self.parameters()).device
 
-        # Loss function (no need for reduction='none'; we average per batch then overall)
         if pos_weight is not None:
             if isinstance(pos_weight, (float, int)):
                 pos_weight = torch.tensor(float(pos_weight), device=device)
@@ -129,7 +143,6 @@ class CzecherTransformer(nn.Module):
         total_loss = 0.0
         n_batches = 0
 
-        # Running counts for micro metrics
         tp = fp = fn = tn = 0
 
         for batch in eval_loader:
@@ -152,7 +165,6 @@ class CzecherTransformer(nn.Module):
             fn += (~preds &  y_true).sum().item()
             tn += (~preds & ~y_true).sum().item()
 
-        # Safeguards against divide-by-zero
         precision = tp / (tp + fp + 1e-12)
         recall    = tp / (tp + fn + 1e-12)
         f1        = 2 * precision * recall / (precision + recall + 1e-12)
@@ -171,48 +183,36 @@ class CzecherTransformer(nn.Module):
         }
     
     @torch.no_grad()
-    def predict_comma_ids(self, input_ids, threshold: float = 0.5, device='cpu'):
-        """Get the idxs of chars after which to add a comma."""
-        self.eval()
-        x = torch.as_tensor(input_ids, dtype=torch.long, device=device).unsqueeze(0)  # [1, T]
-        logits = self(x)                              # [1, T]
-        probs = torch.sigmoid(logits)[0]              # [T]
+    def predict_logits(self, input_ids, device=None):
+        if device is None:
+            device = next(self.parameters()).device
+        x = torch.as_tensor(input_ids, dtype=torch.long, device=device).unsqueeze(0)
+        logits = self(x)[0]
         mask = (x[0] != self.pad_id)
+        return logits, mask
 
-        comma_idxs = torch.nonzero((probs >= threshold) & mask, as_tuple=False).flatten().tolist()
-
-        # Subtract 1 because of BOS token
-        # shifted_idxs = []
-        # for c_idx in comma_idxs:
-        #     shifted_idxs.append(c_idx - 1)
-        return comma_idxs, probs.detach().cpu().tolist()
+    @torch.no_grad()
+    def predict_probs(self, input_ids, device=None):
+        logits, mask = self.predict_logits(input_ids, device)
+        probs = torch.sigmoid(logits)
+        return probs, mask
 
     @torch.no_grad()
     def punctuate(self, text: str, tokenizer: Tokenizer, threshold: float = 0.5, device='cpu'):
+        ## TODO: add option if threshold='best' to use from self.get_best_eval()
         """Return a corrected sentence."""
-        ids = tokenizer.tokenize(text, max_tokens=128)
-        comma_idxs, probs = self.predict_comma_ids(ids, threshold=threshold, device=device)
+        token_ids = tokenizer.tokenize(text, max_tokens=128)
+        probs = self.predict_probs(token_ids, threshold, device)
 
-        commad = ''
+        punctuated = ''
         for idx, comma_prob in enumerate(probs):
-            commad = commad + tokenizer.detokenize([ids[idx]])
+            punctuated = punctuated + tokenizer.detokenize([token_ids[idx]])
             if comma_prob >= threshold:
-                commad = commad + ','
-
-        # out = []
-        # T = len(text)
-        # comma_set = set(comma_idxs)
-
-        # for i, ch in enumerate(text):
-        #     out.append(ch)
-        #     if i in comma_set:
-        #         out.append(",")
-
-        # punctuated = "".join(out)
-        return commad
+                punctuated = punctuated + ','
+        return punctuated
     
     @torch.no_grad()
-    def find_best_threshold(self, eval_loader, device="cpu"):
+    def get_best_eval(self, eval_loader, device="cuda"):
         self.eval()
         probs_all, labels_all, mask_all = [], [], []
         for batch in eval_loader:
@@ -225,7 +225,7 @@ class CzecherTransformer(nn.Module):
         probs = torch.cat(probs_all)   # [N]
         labels = torch.cat(labels_all) # [N] 0/1
 
-        best = {"th": 0.5, "f1": -1, "p": 0, "r": 0}
+        best = { "threshold": 0.5, "f1": -1, "precision": 0, "recall": 0 }
         for th in torch.linspace(0.05, 0.95, 19, device=probs.device):
             pred = probs >= th
             tp = (pred & (labels > 0.5)).sum().item()
@@ -235,6 +235,11 @@ class CzecherTransformer(nn.Module):
             r  = tp / (tp + fn + 1e-12)
             f1 = 2*p*r/(p+r+1e-12)
             if f1 > best["f1"]:
-                best = {"th": float(th.item()), "f1": f1, "p": p, "r": r}
+                best = { "threshold": float(th.item()), "f1": f1, "precision": p, "recall": r }
         return best
     
+
+def collate(batch):
+    inputs = torch.tensor([b['sentence'] for b in batch], dtype=torch.long)
+    labels = torch.tensor([b['commas'] for b in batch], dtype=torch.float32)
+    return { 'inputs': inputs, 'labels': labels }

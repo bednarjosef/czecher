@@ -2,23 +2,11 @@ from pathlib import Path
 from dataset import CommaDataset
 from czecher_tokenizers.bpe_tokenizer import GPTTokenizer
 from czecher_tokenizers.char_tokenizer import CharTokenizer
-# from download_wiki_texts import load_sentences
-from cnn_model import CzecherCNN
-from train import train_model
-from transformer_model import CzecherTransformer
+from utils.download_wiki_texts import load_sentences
+from models.transformer_model import CzecherTransformer
 import torch
 from torch.utils.data import DataLoader
 
-
-def load_sentences(path="sentences.txt"):
-    return [line.rstrip("\n") for line in Path(path).read_text(encoding="utf-8").splitlines()]
-
-def correct_sentence(text, model, tokenizer):
-    punctuated = model.punctuate(text, tokenizer, threshold=0.8)
-
-
-    print("INPUT: ", text)
-    print("OUTPUT:", punctuated)
 
 def collate(batch):
     inputs = torch.tensor([b['sentence'] for b in batch], dtype=torch.long)
@@ -46,52 +34,21 @@ def estimate_pos_weight(tokenizer: CharTokenizer, dataset, device="cpu"):
 
 
 def main():
-    print('Hello world!')
     tokenizer = GPTTokenizer(json_file='tokenizer.json')
-    sentences = load_sentences(path='data/sentences_500k.txt')
-    dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/bpe/dataset_500k.csv', max_tokens=128)
+    dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
+    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256).load('data/500k_model3.pt')
 
-    # dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
-    # point = dataset[394]
-    # tokens = point['sentence']
-    # commas = point['commas']
-    # strs = []
-    # for token_id in tokens:
-    #     tok_str = tokenizer.detokenize([token_id])
-    #     strs.append(tok_str)
-    # final = "|".join(strs)
-    # print(tokens)
-    # print(final)
-    # print(commas)
-    # commad = ''
-    # for idx, cm in enumerate(commas):
-    #     commad = commad + tokenizer.detokenize([tokens[idx]])
-    #     if cm == 1:
-    #         commad = commad + ','
-    # print(commad)
-            
+    best_threshold, progress = model.train_model(dataset, epochs=5, batch_size=256, lr=2e-4, pos_weight=1, print_steps=300)
+    model.save('data/trained_models/500k_model5.pt')
+    # model = model.load('data/500k_model3.pt')
 
-
-    # dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/bpe/dataset_500k.csv', max_tokens=256)
-
-    # tokens = tokenizer.tokenize('Kdyz jsem prisel domu, bylo mi fajn (ale ne moc), a zaroven jsem vubec nevedel, kdy uz prijdou rodice.', max_tokens=256)
-    # strs = []
-    # for token_id in tokens:
-    #     tok_str = tokenizer.detokenize([token_id])
-    #     strs.append(tok_str)
-    # final = "|".join(strs)
-    # print(tokens)
-    # print(final)
-
-    # dataset = CommaDataset().load_dataset('data/dataset.csv')
-    # pos = estimate_pos_weight(tokenizer, dataset, 'cpu')
-    # print(pos)
-    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256)
-    # train_model(model, dataset, epochs=5, batch_size=256)
-    # model.save('data/500k_model1.pt')
-    model = model.load('data/500k_model3.pt')
     text = "V roce 1971 pak Salivarová a Škvorecký založili nakladatelství '68 Publishers kde pak vydávali především české knihy které nemohly vycházet v komunistickém Československu."
-    correct_sentence(text, model, tokenizer)
+    corrected = model.punctuate(text, tokenizer, threshold=best_threshold)
+    print(text)
+    print(corrected)
+
+    # sentences = load_sentences(path='data/sentences_500k.txt')
+    # dataset = CommaDataset().create_dataset(sentences, tokenizer, 'data/bpe/dataset_500k.csv', max_tokens=128)
 
 
 if __name__ == '__main__':
