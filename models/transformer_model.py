@@ -241,11 +241,15 @@ class CzecherTransformer(nn.Module):
         token_ids = tokenizer.tokenize(text, max_tokens=128)
         probs, _mask = self.predict_probs(token_ids, device)
 
+        pad_stop = len(token_ids)
+        if self.pad_id in token_ids:
+            pad_stop = token_ids.index(self.pad_id)
+
         punctuated = ''
-        for idx, comma_prob in enumerate(probs):
-            punctuated = punctuated + tokenizer.detokenize([token_ids[idx]])
-            if comma_prob >= threshold:
-                punctuated = punctuated + ','
+        for idx in range(pad_stop):
+            punctuated += tokenizer.detokenize([token_ids[idx]])
+            if probs[idx] >= threshold:
+                punctuated += ','
         return punctuated
     
     @torch.no_grad()

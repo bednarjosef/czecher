@@ -58,7 +58,7 @@ def main():
 
     tokenizer = GPTTokenizer(json_file='tokenizer.json')
     dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
-    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256, num_layers=layers).load('data/500k_model3.pt')
+    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256, num_layers=layers).load('data/trained_models/500k_model7.pt')
 
     best_threshold, progress = model.train_model(dataset, epochs=epochs, batch_size=batch_size, lr=lr, pos_weight=pos_weight, log_every=300, log_fn=run.log)
     model.save('data/trained_models/500k_model5.pt')
