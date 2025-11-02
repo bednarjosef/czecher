@@ -22,14 +22,14 @@ from memmap_dataset import CommaMemmapDataset
 # ----------------------------
 # User/configurable settings
 # ----------------------------
-depth = 10
+depth = 12
 lr = 1e-4                    # base LR (we'll scale by world_size below if you want)
 dropout = 0.05
 max_tokens = 128
 epochs = 1
 eval_every = 200             # optimizer steps (global) between evals
-batch_size_per_gpu = 512     # per-rank (per GPU)
-grad_accum_steps = 2
+batch_size_per_gpu = 1024     # per-rank (per GPU)
+grad_accum_steps = 1
 dataset_size = 5_000_000
 
 # Optimization
@@ -241,8 +241,8 @@ for epoch in range(1, epochs + 1):
     total_loss = 0.0
     epoch_start = time.time()
 
-    for step_in_epoch in range(steps_per_epoch):
-        last_global_step = (global_step + 1) == total_steps
+    for step_in_epoch in range(1, steps_per_epoch + 1):
+        last_global_step = (global_step) == total_steps
 
         synchronize()
         iter_start = time.time()
@@ -295,18 +295,18 @@ for epoch in range(1, epochs + 1):
         if is_master and (global_step % 50 == 0):
             dt = time.time() - iter_start
             tok_per_sec = int(tokens_per_step_global / max(dt, 1e-9))
-            print(f"[step {global_step+1}/{total_steps}] lr={lr_now:.2e} loss={loss.item():.4f} tok/s={tok_per_sec:,}")
-            run.log({"lr": lr_now, "tok/s": tok_per_sec}, step=global_step+1)
+            print(f"[step {global_step}/{total_steps}] lr={lr_now:.2e} loss={loss.item():.4f} tok/s={tok_per_sec:,}")
+            run.log({"lr": lr_now, "tok/s": tok_per_sec}, step=global_step)
 
         # Periodic eval (master only)
-        if is_master and (last_global_step or ((global_step + 1) % eval_every == 0)):
+        if is_master and (last_global_step or ((global_step) % eval_every == 0)):
             model.eval()
             # unwrap if DDP for evaluation helper
             eval_model = model.module if ddp else model
             best_eval = eval_model.get_best_eval(eval_loader, device=str(device))
-            best_eval["train/loss"] = total_loss / max(1, (step_in_epoch + 1))
-            run.log(best_eval, step=global_step+1)
-            print(f"[eval] step={global_step+1} loss={best_eval['train/loss']:.4f} f1={best_eval['eval/f1']:.3f}")
+            best_eval["train/loss"] = total_loss / max(1, (step_in_epoch))
+            run.log(best_eval, step=global_step)
+            print(f"[eval] step={global_step} loss={best_eval['train/loss']:.4f} f1={best_eval['eval/f1']:.3f}")
             model.train()
 
         global_step += 1
