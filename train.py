@@ -16,11 +16,12 @@ import torch
 device_type = ""
 depth = 10
 lr = 1e-4
+dropout = 0.05
 max_tokens = 128
 epochs = 1
-eval_every = 300
-device_batch_size = 128 # per-device batch size
-grad_accum_steps = 4
+eval_every = 1000
+device_batch_size = 512 # per-device batch size
+grad_accum_steps = 2
 dataset_size = 5_000_000
 
 num_iterations = dataset_size // device_batch_size # explicit number of steps of the optimization (-1 = disable)
@@ -28,7 +29,7 @@ num_iterations = dataset_size // device_batch_size # explicit number of steps of
 # Optimization
 weight_decay = 0.01 # weight decay for the embedding/unembedding parameters (Adam)
 grad_clip = 1.0 # gradient clipping value (0.0 = disabled)
-warmup_ratio = 0.2 # ratio of iterations for LR warmup
+warmup_ratio = 0.1 # ratio of iterations for LR warmup
 warmdown_ratio = 0.2 # ratio of iterations for LR warmdown
 final_lr_frac = 0.2 # final LR is this fraction of the initial LR
 
@@ -51,7 +52,7 @@ num_heads = max(1, (model_dim + 127) // 128) # head dim 128 (the division here i
 dim_ff = 4 * model_dim
 
 # Initialize the Model
-model = CzecherTransformer(vocab_size=vocab_size, pad_id=tokenizer.get_pad_token_id(), max_tokens=max_tokens, num_layers=num_layers, d_model=model_dim, embedding_dim=model_dim, nhead=num_heads, dim_ff=dim_ff)
+model = CzecherTransformer(vocab_size=vocab_size, pad_id=tokenizer.get_pad_token_id(), max_tokens=max_tokens, num_layers=num_layers, d_model=model_dim, embedding_dim=model_dim, nhead=num_heads, dim_ff=dim_ff, dropout=dropout)
 model.to(device_type)
 model = torch.compile(model, dynamic=False)
 num_params = sum(p.numel() for p in model.parameters())
@@ -113,6 +114,7 @@ run = wandb.init(
         "batch_size": device_batch_size,
         "grad_accum_steps": grad_accum_steps,
         "learning_rate": lr,
+        "dropout": dropout,
         "weight_decay": weight_decay,
         "layers": depth,
         "d_model": model_dim,
