@@ -26,11 +26,11 @@ depth = 12
 lr = 1e-4                    # base LR (we'll scale by world_size below if you want)
 dropout = 0.05
 max_tokens = 128
-epochs = 1
-eval_every = 200             # optimizer steps (global) between evals
-batch_size_per_gpu = 1024     # per-rank (per GPU)
-grad_accum_steps = 1
-dataset_size = 5_000_000
+epochs = 2
+eval_every = 1000            # optimizer steps (global) between evals
+batch_size_per_gpu = 512     # per-rank (per GPU)
+grad_accum_steps = 2
+dataset_size = 10_000_000
 
 # Optimization
 weight_decay = 0.01
@@ -190,6 +190,7 @@ if is_master:
         project="czecher-commas",
         config={
             "epochs": epochs,
+            "total_steps": total_steps,
             "max_tokens": max_tokens,
             "batch_size_per_gpu": batch_size_per_gpu,
             "grad_accum_steps": grad_accum_steps,
@@ -202,7 +203,7 @@ if is_master:
             "num_heads": num_heads,
             "dim_ff": dim_ff,
             "architecture": "Transformer",
-            "dataset": "comma_memmap_5m",
+            "dataset": "comma_memmap_10m",
             "world_size": world_size,
         },
     )
@@ -307,6 +308,7 @@ for epoch in range(1, epochs + 1):
             best_eval["train/loss"] = total_loss / max(1, (step_in_epoch))
             run.log(best_eval, step=global_step)
             print(f"[eval] step={global_step} loss={best_eval['train/loss']:.4f} f1={best_eval['eval/f1']:.3f}")
+            model.save_checkpoint(path=os.path.join('checkpoints', "last.pt"), optimizer=optimizer, global_steps=global_step)
             model.train()
 
         global_step += 1
@@ -322,7 +324,7 @@ for epoch in range(1, epochs + 1):
 if is_master:
     # unwrap if DDP
     to_save = model.module if ddp else model
-    to_save.save("data/trained_models/5m_model_4gpu_1.pt")
+    to_save.save("data/trained_models/10m_4xGPU_12layer_2epoch_1.pt")
     print("[train] training finished, model saved.")
 
 # Clean up

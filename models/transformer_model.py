@@ -170,42 +170,32 @@ class CzecherTransformer(nn.Module):
     #     # best_eval['epoch'] = epoch
     #     return best_eval, global_steps
 
-    def _checkpoint_payload(self, optimizer=None, scaler=None, epoch=0, global_steps=0, best_f1=None, extra: dict | None = None):
+    def _checkpoint_payload(self, optimizer=None, global_steps=0, extra: dict | None = None):
         return {
             "format": "CommaModel.v1",
             "config": self._config,
             "state_dict": self.state_dict(),
             "optimizer": optimizer.state_dict() if optimizer is not None else None,
-            "scaler": scaler.state_dict() if (scaler is not None) else None,
-            "epoch": epoch,
             "global_steps": global_steps,
-            "best_f1": best_f1,
             "extra": extra or {},
-            # Optional: RNG states for full determinism
-            "rng": {
-                "torch": torch.get_rng_state(),
-                "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
-            }
         }
 
-    def save_checkpoint(self, path: str, optimizer=None, scaler=None, epoch=0, global_steps=0, best_f1=None, extra: dict | None = None):
+    def save_checkpoint(self, path: str, optimizer=None, global_steps=0, extra: dict | None = None):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        torch.save(self._checkpoint_payload(optimizer, scaler, epoch, global_steps, best_f1, extra), path)
+        torch.save(self._checkpoint_payload(optimizer, global_steps, extra), path)
         print(f"[ckpt] Saved checkpoint → {path}")
 
     @classmethod
     def load_checkpoint(cls, path: str, map_location: str | torch.device = "cpu"):
-        """Returns (model, optimizer_state_dict, scaler_state_dict, meta_dict)"""
+        """Returns (model, optimizer_state_dict, meta_dict)"""
         ckpt = torch.load(path, map_location=map_location)
         model = cls(**ckpt["config"])
         model.load_state_dict(ckpt["state_dict"], strict=True)
         meta = {
-            "epoch": ckpt.get("epoch", 0),
             "global_steps": ckpt.get("global_steps", 0),
-            "best_f1": ckpt.get("best_f1", None),
             "extra": ckpt.get("extra", {}),
         }
-        return model, ckpt.get("optimizer"), ckpt.get("scaler"), meta
+        return model, ckpt.get("optimizer"), meta
     
 
     def save(self, path: str = 'model.pt') -> None:
