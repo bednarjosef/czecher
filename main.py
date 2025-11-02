@@ -36,6 +36,12 @@ def estimate_pos_weight(tokenizer: CharTokenizer, dataset, device="cpu"):
 
 
 def main():
+    # depth = 20
+    # num_layers = 20
+    # model_dim = 20 * 64 = 1280
+    # num_heads = max(1, (model_dim + 127) // 128) = 1407 // 128 = 10 # head dim 128 (the division here is ceil div)
+    # num_kv_heads = num_heads = 10
+
     epochs = 1
     batch_size = 512
     lr = 2e-4
@@ -53,14 +59,14 @@ def main():
             "pos_weight": pos_weight,
             "layers": layers,
             "architecture": "Transformer",
-            "dataset": "dataset_500k"
+            "dataset": "comma_memmap_5m"
         }
     )
 
     tokenizer = GPTTokenizer(json_file='tokenizer.json')
     # dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
     dataset = CommaMemmapDataset("./comma_memmap/inputs.bin", "./comma_memmap/labels.bin", max_tokens=128, pad_id=tokenizer.get_pad_token_id())
-    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256, num_layers=layers)
+    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256, max_tokens=128, num_layers=layers)
     # model = model.load('data/trained_models/500k_model7.pt')
 
     best_threshold, progress = model.train_model(dataset, epochs=epochs, batch_size=batch_size, lr=lr, pos_weight=pos_weight, log_every=300, log_fn=run.log)

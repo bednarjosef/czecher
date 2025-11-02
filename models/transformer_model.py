@@ -9,11 +9,11 @@ from utils.train_logger import log_step_wandb
 
 
 class CzecherTransformer(nn.Module):
-    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 256, max_len: int = 512, d_model: int = 256, nhead: int = 4, num_layers: int = 5, dim_ff: int = 512, dropout: float = 0.1):
+    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 256, max_tokens: int = 128, d_model: int = 256, nhead: int = 4, num_layers: int = 5, dim_ff: int = 512, dropout: float = 0.1):  # max_tokens = 512
         super().__init__()
         self.pad_id = pad_id
         self.embed = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_id)
-        self.pos = nn.Embedding(max_len, d_model)
+        self.pos = nn.Embedding(max_tokens, d_model)
 
         enc_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=dim_ff,
@@ -26,7 +26,7 @@ class CzecherTransformer(nn.Module):
             vocab_size=vocab_size,
             pad_id=pad_id,
             embedding_dim=embedding_dim,
-            max_len=max_len,
+            max_len=max_tokens,
             d_model=d_model,
             nhead=nhead,
             num_layers=num_layers,
