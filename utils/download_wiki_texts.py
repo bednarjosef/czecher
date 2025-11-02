@@ -45,8 +45,8 @@ def download_wiki_sentences():
             s = sent.strip()
             if MIN_LEN <= len(s) <= MAX_LEN:
                 sentences.append(s)
-                # (optional) comment out to avoid spammy console:
-                print(f'Found {len(sentences)}/{TARGET_SENTENCES} sentences.')
+                if len(sentences) % (TARGET_SENTENCES // 10):  # print only on every 10%
+                    print(f'Found {len(sentences)}/{TARGET_SENTENCES} sentences.')
                 if len(sentences) >= TARGET_SENTENCES:
                     break
 
@@ -56,4 +56,4 @@ def download_wiki_sentences():
 
 if __name__ == '__main__':
     sentences = download_wiki_sentences()
-    save_sentences(sentences, 'data/sentences_5M.txt')
+    save_sentences(sentences, 'data/sentences_5m.txt')

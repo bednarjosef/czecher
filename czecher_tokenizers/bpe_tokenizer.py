@@ -8,7 +8,7 @@ class GPTTokenizer(Tokenizer):
         super().__init__(norm_form)
         self.tokenizer = HuggingFaceTokenizer.from_directory('czecher_tokenizers', json_file=json_file)
 
-    def vocab_size(self):
+    def get_vocab_size(self):
         return self.tokenizer.get_vocab_size()
     
     # def get_token_id(self, token: str):

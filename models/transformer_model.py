@@ -17,9 +17,10 @@ class CzecherTransformer(nn.Module):
 
         enc_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=dim_ff,
-            dropout=dropout, batch_first=True, activation="gelu"
+            dropout=dropout, batch_first=True, activation="gelu", norm_first=True
         )
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_layers)
+        self.final_ln = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, 1)
 
         self._config = dict(
@@ -34,6 +35,140 @@ class CzecherTransformer(nn.Module):
             dropout=dropout,
         )
         self.to("cuda" if torch.cuda.is_available() else "cpu")
+    
+    def forward(self, input_ids):
+        B, T = input_ids.shape
+        device = input_ids.device
+        pos_ids = torch.arange(T, device=device).unsqueeze(0).expand(B, T)
+
+        x = self.embed(input_ids) + self.pos(pos_ids)
+        key_pad = input_ids.eq(self.pad_id)
+
+        h = self.encoder(x, src_key_padding_mask=key_pad)
+        h = self.final_ln(h)
+        logits = self.head(h).squeeze(-1)
+        return logits
+    
+    # def train_model(self, dataset, epochs: int, batch_size: int = 256, lr: float = 2e-4, pos_weight: float = 3, log_every: int = 300, log_fn = None, save_every_steps: int | None = 5000, resume_from: str | None = None) -> tuple[float, list]:
+    #     train_start = time.time()
+
+    #     torch.backends.cuda.matmul.allow_tf32 = True
+    #     torch.backends.cudnn.allow_tf32 = True
+
+    #     progress = []
+    #     ckpt_dir = 'checkpoints'
+
+    #     print(f'Creating splits...')
+    #     split = int(0.90 * len(dataset))
+    #     train_ds, eval_ds = torch.utils.data.random_split(dataset, [split, len(dataset)-split])
+
+    #     print(f'Creating DataLoaders...')
+    #     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=True, persistent_workers=True, num_workers=8, prefetch_factor=2)
+    #     eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False, pin_memory=True, persistent_workers=True, num_workers=8)
+
+    #     print(f'Loading model and optimizer...')
+    #     device = "cuda" if torch.cuda.is_available() else "cpu"
+    #     self.to(device)
+
+    #     scaler = torch.amp.GradScaler(device)
+    #     optimizer = AdamW(self.parameters(), lr=lr, weight_decay=0.01, fused=True)
+    #     use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    #     amp_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16 if use_bf16 else torch.float16)
+
+    #     best_f1 = -1.0
+    #     start_epoch = 1
+
+    #     if resume_from:
+    #         print(f"[ckpt] Resuming from {resume_from}")
+    #         model_loaded, opt_state, scaler_state, meta = self.load_checkpoint(resume_from, map_location=device)
+    #         self.load_state_dict(model_loaded.state_dict(), strict=True)
+    #         if opt_state is not None:
+    #             optimizer.load_state_dict(opt_state)
+    #         if scaler_state is not None and torch.cuda.is_available():
+    #             scaler.load_state_dict(scaler_state)
+    #         start_epoch = int(meta.get("epoch", 0)) + 1
+    #         global_steps = int(meta.get("global_steps", 0))
+    #         best_f1 = float(meta.get("best_f1", -1.0))
+
+    #     print(f'Beginning training...')
+    #     global_steps = 0
+    #     for epoch in range(start_epoch, epochs + 1):
+    #         ts = time.time()
+    #         best_eval, global_steps = self.train_epoch(global_steps, train_loader, eval_loader, lr=lr, pos_weight=pos_weight, device=device, log_every=log_every, log_fn=log_fn, optimizer=optimizer, scaler=scaler, amp_ctx=amp_ctx, save_every_steps=save_every_steps, epoch=epoch, best_f1=best_f1)
+    #         log_fn(best_eval)
+    #         progress.append(best_eval)
+
+    #         curr_f1 = best_eval["eval/f1"]
+    #         if curr_f1 > best_f1:
+    #             best_f1 = curr_f1
+    #             self.save_checkpoint(
+    #                 os.path.join(ckpt_dir, "best.pt"),
+    #                 optimizer=optimizer, scaler=scaler,
+    #                 epoch=epoch, global_steps=global_steps, best_f1=best_f1
+    #             )
+
+    #         # Always save "last.pt" at end of epoch
+    #         self.save_checkpoint(
+    #             os.path.join(ckpt_dir, "last.pt"),
+    #             optimizer=optimizer, scaler=scaler,
+    #             epoch=epoch, global_steps=global_steps, best_f1=best_f1
+    #         )
+
+    #         print(f"Epoch {epoch} - {round(time.time() - ts, 2)} seconds: loss={best_eval['train/loss']:.4f} best_threshold={best_eval['eval/best_threshold']:.2f} | P/R/F1={best_eval['eval/precision']:.3f}/{best_eval['eval/recall']:.3f}/{best_eval['eval/f1']:.3f}")
+
+    #     print(f'Training {epochs} epochs complete in {round(time.time() - train_start)} seconds.')
+    #     return best_eval['eval/best_threshold'], progress
+    
+    # def train_epoch(self, global_steps: int, train_loader: DataLoader, eval_loader: DataLoader, lr: float = 2e-4, pos_weight: float = 1, device = 'cuda', log_every: int = 300, log_fn = None, optimizer=None, scaler=None, amp_ctx=None, save_every_steps=None, epoch=None, best_f1=None) -> tuple[dict, int]:
+    #     self.train()
+    #     self.to(device)
+
+    #     loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(pos_weight), device=device))
+
+    #     steps = len(train_loader)
+    #     total_loss = 0.0
+    #     ts = time.time()
+    #     for step, batch in enumerate(train_loader, start=1):
+    #         inputs = batch['inputs'].to(device).long()
+    #         labels = batch['labels'].to(device).float()
+    #         optimizer.zero_grad(set_to_none=True)
+    #         mask = (inputs != self.pad_id)
+
+    #         with amp_ctx:
+    #             logits = self(inputs)
+    #             loss = loss_fn(logits[mask], labels[mask])
+            
+    #         scaler.scale(loss).backward()
+    #         scaler.unscale_(optimizer)
+    #         torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+    #         scaler.step(optimizer)
+    #         scaler.update()
+    #         optimizer.zero_grad(set_to_none=True)
+    #         total_loss += float(loss.item())
+
+    #         global_steps += 1
+    #         if log_every and global_steps % log_every == 0:
+    #             best_eval = self.get_best_eval(eval_loader, device=device)
+    #             best_eval['train/loss'] = total_loss / max(1, step)
+
+    #             print(f'Finished {step}/{steps} steps in epoch - {round(step / (time.time() - ts), 2)} steps/second ({global_steps} total steps)')
+    #             log_fn(best_eval, step=global_steps)
+            
+    #         if save_every_steps and (global_steps % save_every_steps == 0):
+    #             self.save_checkpoint(
+    #                 os.path.join('checkpoints', f"step_{global_steps}.pt"),
+    #                 optimizer=optimizer,
+    #                 scaler=scaler if device == 'cuda' else None,
+    #                 epoch=epoch,
+    #                 global_steps=global_steps,
+    #                 best_f1=best_f1,
+    #             )
+        
+
+    #     best_eval = self.get_best_eval(eval_loader, device=device)
+    #     best_eval['train/loss'] = total_loss / max(1, steps)
+    #     # best_eval['epoch'] = epoch
+    #     return best_eval, global_steps
 
     def _checkpoint_payload(self, optimizer=None, scaler=None, epoch=0, global_steps=0, best_f1=None, extra: dict | None = None):
         return {
@@ -71,137 +206,8 @@ class CzecherTransformer(nn.Module):
             "extra": ckpt.get("extra", {}),
         }
         return model, ckpt.get("optimizer"), ckpt.get("scaler"), meta
-
     
-    def forward(self, input_ids):
-        B, T = input_ids.shape
-        device = input_ids.device
-        pos_ids = torch.arange(T, device=device).unsqueeze(0).expand(B, T)
 
-        x = self.embed(input_ids) + self.pos(pos_ids)
-        key_pad = input_ids.eq(self.pad_id)
-
-        h = self.encoder(x, src_key_padding_mask=key_pad)
-        logits = self.head(h).squeeze(-1)
-        return logits
-    
-    def train_model(self, dataset, epochs: int, batch_size: int = 256, lr: float = 2e-4, pos_weight: float = 3, log_every: int = 300, log_fn = None, save_every_steps: int | None = 5000, resume_from: str | None = None) -> tuple[float, list]:
-        train_start = time.time()
-
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-
-        progress = []
-        ckpt_dir = 'checkpoints'
-
-        print(f'Creating splits...')
-        split = int(0.90 * len(dataset))
-        train_ds, eval_ds = torch.utils.data.random_split(dataset, [split, len(dataset)-split])
-
-        print(f'Creating DataLoaders...')
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0)
-        eval_loader = DataLoader(eval_ds, batch_size=batch_size, shuffle=False, num_workers=0)
-
-        print(f'Loading model and optimizer...')
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.to(device)
-
-        scaler = torch.amp.GradScaler(device)
-        optimizer = AdamW(self.parameters(), lr=lr)
-        best_f1 = -1.0
-        start_epoch = 1
-
-        if resume_from:
-            print(f"[ckpt] Resuming from {resume_from}")
-            model_loaded, opt_state, scaler_state, meta = self.load_checkpoint(resume_from, map_location=device)
-            self.load_state_dict(model_loaded.state_dict(), strict=True)
-            if opt_state is not None:
-                optimizer.load_state_dict(opt_state)
-            if scaler_state is not None and torch.cuda.is_available():
-                scaler.load_state_dict(scaler_state)
-            start_epoch = int(meta.get("epoch", 0)) + 1
-            global_steps = int(meta.get("global_steps", 0))
-            best_f1 = float(meta.get("best_f1", -1.0))
-
-        print(f'Beginning training...')
-        global_steps = 0
-        for epoch in range(start_epoch, epochs + 1):
-            ts = time.time()
-            best_eval, global_steps = self.train_epoch(global_steps, train_loader, eval_loader, lr=lr, pos_weight=pos_weight, device=device, log_every=log_every, log_fn=log_fn, optimizer=optimizer, scaler=scaler, save_every_steps=save_every_steps, epoch=epoch, best_f1=best_f1)
-            log_fn(best_eval)
-            progress.append(best_eval)
-
-            curr_f1 = best_eval["eval/f1"]
-            if curr_f1 > best_f1:
-                best_f1 = curr_f1
-                self.save_checkpoint(
-                    os.path.join(ckpt_dir, "best.pt"),
-                    optimizer=optimizer, scaler=scaler,
-                    epoch=epoch, global_steps=global_steps, best_f1=best_f1
-                )
-
-            # Always save "last.pt" at end of epoch
-            self.save_checkpoint(
-                os.path.join(ckpt_dir, "last.pt"),
-                optimizer=optimizer, scaler=scaler,
-                epoch=epoch, global_steps=global_steps, best_f1=best_f1
-            )
-
-            print(f"Epoch {epoch} - {round(time.time() - ts, 2)} seconds: loss={best_eval['train/loss']:.4f} best_threshold={best_eval['eval/best_threshold']:.2f} | P/R/F1={best_eval['eval/precision']:.3f}/{best_eval['eval/recall']:.3f}/{best_eval['eval/f1']:.3f}")
-
-        print(f'Training {epochs} epochs complete in {round(time.time() - train_start)} seconds.')
-        return best_eval['eval/best_threshold'], progress
-    
-    def train_epoch(self, global_steps: int, train_loader: DataLoader, eval_loader: DataLoader, lr: float = 2e-4, pos_weight: float = 1, device = 'cuda', log_every: int = 300, log_fn = None, optimizer=None, scaler=None, save_every_steps=None, epoch=None, best_f1=None) -> tuple[dict, int]:
-        self.train()
-        self.to(device)
-
-        loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(pos_weight), device=device))
-
-        steps = len(train_loader)
-        total_loss = 0.0
-        ts = time.time()
-        for step, batch in enumerate(train_loader, start=1):
-            inputs = batch['inputs'].to(device).long()
-            labels = batch['labels'].to(device).float()
-            optimizer.zero_grad(set_to_none=True)
-            mask = (inputs != self.pad_id)
-
-            with torch.amp.autocast(device_type=device, dtype=torch.float16):
-                logits = self(inputs)
-                loss = loss_fn(logits[mask], labels[mask])
-            
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
-            scaler.step(optimizer)
-            scaler.update()
-            total_loss += float(loss.item())
-            global_steps += 1
-            if log_every and global_steps % log_every == 0:
-                best_eval = self.get_best_eval(eval_loader, device=device)
-                best_eval['train/loss'] = total_loss / max(1, step)
-
-                print(f'Finished {step}/{steps} steps in epoch - {round(step / (time.time() - ts), 2)} steps/second ({global_steps} total steps)')
-                log_fn(best_eval, step=global_steps)
-            
-            if save_every_steps and (global_steps % save_every_steps == 0):
-                self.save_checkpoint(
-                    os.path.join('checkpoints', f"step_{global_steps}.pt"),
-                    optimizer=optimizer,
-                    scaler=scaler if device == 'cuda' else None,
-                    epoch=epoch,
-                    global_steps=global_steps,
-                    best_f1=best_f1,
-                )
-        
-
-        best_eval = self.get_best_eval(eval_loader, device=device)
-        best_eval['train/loss'] = total_loss / max(1, steps)
-        # best_eval['epoch'] = epoch
-        return best_eval, global_steps
-
-    
     def save(self, path: str = 'model.pt') -> None:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         payload = {
@@ -281,8 +287,3 @@ class CzecherTransformer(nn.Module):
                 best = { "eval/best_threshold": round(float(th.item()), 4), "eval/f1": round(f1, 4), "eval/precision": round(p, 4), "eval/recall": round(r, 4) }
         return best
     
-
-def collate(batch):
-    inputs = torch.tensor([b['sentence'] for b in batch], dtype=torch.long)
-    labels = torch.tensor([b['commas'] for b in batch], dtype=torch.float32)
-    return { 'inputs': inputs, 'labels': labels }

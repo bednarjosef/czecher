@@ -47,7 +47,13 @@ def main():
     lr = 2e-4
     pos_weight = 1
 
-    layers = 7
+    layers = 10
+    d_model = layers * 64
+    nhead = max(1, d_model // 64)
+    while d_model % nhead != 0:
+        nhead -= 1
+    dim_ff = 4 * d_model
+    
 
     run = wandb.init(
         entity="czecher-team",
@@ -58,6 +64,9 @@ def main():
             "learning_rate": lr,
             "pos_weight": pos_weight,
             "layers": layers,
+            "d_model": d_model,
+            "num_heads": nhead,
+            "dim_ff": dim_ff,
             "architecture": "Transformer",
             "dataset": "comma_memmap_5m"
         }
@@ -65,15 +74,15 @@ def main():
 
     tokenizer = GPTTokenizer(json_file='tokenizer.json')
     # dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
-    dataset = CommaMemmapDataset("./comma_memmap/inputs.bin", "./comma_memmap/labels.bin", max_tokens=128, pad_id=tokenizer.get_pad_token_id())
-    model = CzecherTransformer(vocab_size=tokenizer.vocab_size(), pad_id=tokenizer.get_pad_token_id(), embedding_dim=256, max_tokens=128, num_layers=layers)
-    # model = model.load('data/trained_models/500k_model7.pt')
+    # dataset = CommaMemmapDataset("./comma_memmap/inputs.bin", "./comma_memmap/labels.bin", max_tokens=128, pad_id=tokenizer.get_pad_token_id())
+    model = CzecherTransformer(vocab_size=tokenizer.get_vocab_size(), pad_id=tokenizer.get_pad_token_id(), max_tokens=128, num_layers=layers, d_model=d_model, embedding_dim=d_model, nhead=nhead, dim_ff=dim_ff)
+    model = model.load('data/trained_models/500k_model7.pt')
 
-    best_threshold, progress = model.train_model(dataset, epochs=epochs, batch_size=batch_size, lr=lr, pos_weight=pos_weight, log_every=300, log_fn=run.log)
-    model.save('data/trained_models/5m_model1.pt')
+    # best_threshold, progress = model.train_model(dataset, epochs=epochs, batch_size=batch_size, lr=lr, pos_weight=pos_weight, log_every=300, log_fn=run.log)
+    # model.save('data/trained_models/5m_model1.pt')
 
     text = "V roce 1971 pak Salivarová a Škvorecký založili nakladatelství '68 Publishers kde pak vydávali především české knihy které nemohly vycházet v komunistickém Československu."
-    corrected = model.punctuate(text, tokenizer, threshold=best_threshold, device=None)
+    corrected = model.punctuate(text, tokenizer, threshold=0.45, device=None)
     print(text)
     print(corrected)
 
