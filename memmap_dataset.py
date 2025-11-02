@@ -4,7 +4,7 @@ from torch.utils.data import Dataset
 
 class CommaMemmapDataset(Dataset):
     def __init__(self, inputs_path: str, labels_path: str, max_tokens: int, pad_id: int = 0):
-        self.X = np.memmap(inputs_path, mode='r', dtype=np.uint32)  # or uint32, must match
+        self.X = np.memmap(inputs_path, mode='r', dtype=np.uint16)  # or uint32, must match
         self.Y = np.memmap(labels_path, mode='r', dtype=np.uint8)
         self.max_tokens = max_tokens
         self.pad_id = pad_id

@@ -45,7 +45,7 @@ def download_wiki_sentences():
             s = sent.strip()
             if MIN_LEN <= len(s) <= MAX_LEN:
                 sentences.append(s)
-                if len(sentences) % (TARGET_SENTENCES // 10):  # print only on every 10%
+                if len(sentences) % (TARGET_SENTENCES // 10) == 0:  # print only on every 10%
                     print(f'Found {len(sentences)}/{TARGET_SENTENCES} sentences.')
                 if len(sentences) >= TARGET_SENTENCES:
                     break

@@ -27,7 +27,7 @@ lr = 1e-4                    # base LR (we'll scale by world_size below if you w
 dropout = 0.05
 max_tokens = 128
 epochs = 1
-eval_every = 1000            # optimizer steps (global) between evals
+eval_every = 200             # optimizer steps (global) between evals
 batch_size_per_gpu = 512     # per-rank (per GPU)
 grad_accum_steps = 2
 dataset_size = 5_000_000
@@ -108,12 +108,7 @@ if is_master:
 # ----------------------------
 # Dataset / Loaders
 # ----------------------------
-dataset = CommaMemmapDataset(
-    "./comma_memmap/inputs.bin",
-    "./comma_memmap/labels.bin",
-    max_tokens=max_tokens,
-    pad_id=tokenizer.get_pad_token_id(),
-)
+dataset = CommaMemmapDataset("./comma_memmap/inputs.bin", "./comma_memmap/labels.bin", max_tokens=max_tokens, pad_id=tokenizer.get_pad_token_id())
 
 if is_master:
     print("Creating splits...")
@@ -225,7 +220,7 @@ loss_fn = nn.BCEWithLogitsLoss()
 # ----------------------------
 # Training
 # ----------------------------
-global_step = 0
+global_step = 1
 tokens_per_step_global = batch_size_per_gpu * max_tokens * grad_accum_steps * world_size
 
 for epoch in range(1, epochs + 1):
@@ -327,7 +322,7 @@ for epoch in range(1, epochs + 1):
 if is_master:
     # unwrap if DDP
     to_save = model.module if ddp else model
-    to_save.save("data/trained_models/5m_model_ddp.pt")
+    to_save.save("data/trained_models/5m_model_4gpu_1.pt")
     print("[train] training finished, model saved.")
 
 # Clean up
