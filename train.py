@@ -1,4 +1,6 @@
-import os
+# torchrun --standalone --nproc_per_node=4 train.py
+
+import os, argparse
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import time
@@ -14,10 +16,18 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 import wandb
 
-from czecher_tokenizers.czecher_tokenizer import Tokenizer
-from models.transformer_model import CzecherTransformer
-from memmap_dataset import MemmapDataset
+from tokenizer import Tokenizer
+from model import CzecherTransformer
+from dataset import MemmapDataset
 
+
+# parser = argparse.ArgumentParser(description='Start the training loop.')
+# parser.add_argument('--tokenizer_path', type=str, help='Direct path to the tokenizer json.')
+# args = parser.parse_args()
+
+dataset_path = 'downloads/dataset'
+tokenizer_path = 'downloads/dataset/tokenizer.json'
+save_name = '11m_12layer_2epoch.pt'
 
 # ----------------------------
 # User/configurable settings
@@ -26,11 +36,10 @@ depth = 12
 lr = 1e-4                    # base LR (we'll scale by world_size below if you want)
 dropout = 0.05
 max_tokens = 128
-epochs = 2
-eval_every = 1000            # optimizer steps (global) between evals
-batch_size_per_gpu = 512     # per-rank (per GPU)
+epochs = 1
+eval_every = 1000
+batch_size_per_gpu = 512
 grad_accum_steps = 2
-dataset_size = 11_000_000
 
 # Optimization
 weight_decay = 0.01
@@ -69,12 +78,10 @@ use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
 autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16) if device.type == "cuda" else nullcontext()
 synchronize = torch.cuda.synchronize if device.type == "cuda" else (lambda: None)
 
-ds_path = ''
-
 # ----------------------------
 # Tokenizer / model dims
 # ----------------------------
-tokenizer = Tokenizer.from_directory(tokenizer_dir=ds_path, json_file='')
+tokenizer = Tokenizer.from_json(tokenizer_path)
 vocab_size = tokenizer.get_vocab_size()
 if is_master:
     print(f"Vocab size: {vocab_size:,}")
@@ -100,7 +107,6 @@ model = CzecherTransformer(
 )
 
 model.to(device)
-# compile BEFORE wrapping with DDP
 model = torch.compile(model, dynamic=False)
 
 num_params = sum(p.numel() for p in model.parameters())
@@ -110,7 +116,7 @@ if is_master:
 # ----------------------------
 # Dataset / Loaders
 # ----------------------------
-dataset = MemmapDataset(ds_path, max_tokens=max_tokens, pad_id=tokenizer.get_pad_token_id())
+dataset = MemmapDataset(dataset_path, max_tokens=max_tokens, pad_id=tokenizer.get_pad_token_id())
 
 if is_master:
     print("Creating splits...")
@@ -306,10 +312,10 @@ for epoch in range(1, epochs + 1):
             model.eval()
             # unwrap if DDP for evaluation helper
             eval_model = model.module if ddp else model
-            best_eval = eval_model.get_best_eval(eval_loader, device=str(device))  ## TODO: ONLY 50% THRESHOLD EVAL, also get train/precision,recall,f1
-            best_eval["train/loss"] = total_loss / max(1, (step_in_epoch))
-            run.log(best_eval, step=global_step)
-            print(f"[eval] step={global_step} loss={best_eval['train/loss']:.4f} f1={best_eval['eval/f1']:.3f}")
+            eval = eval_model.get_full_eval(train_loader, eval_loader, threshold=0.5, device=str(device))
+            eval["train/loss"] = total_loss / max(1, (step_in_epoch))
+            run.log(eval, step=global_step)
+            print(f"[eval] step={global_step} loss={eval['train/loss']:.4f} f1={eval['eval/f1']:.3f}")
             # model.save_checkpoint(path=os.path.join('checkpoints', "last.pt"), optimizer=optimizer, global_steps=global_step)
             model.train()
 
@@ -326,7 +332,8 @@ for epoch in range(1, epochs + 1):
 if is_master:
     # unwrap if DDP
     to_save = model.module if ddp else model
-    to_save.save("data/trained_models/10m_4xGPU_12layer_2epoch_1.pt")
+    os.makedirs('models', exist_ok=True)
+    to_save.save(f'models/{save_name}')
     # model.save_checkpoint(path=os.path.join('checkpoints', "last.pt"), optimizer=optimizer, global_steps=global_step)
     print("[train] training finished, model saved.")
 

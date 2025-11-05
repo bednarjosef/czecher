@@ -27,9 +27,9 @@ class Tokenizer:
         return cls(tokenizer)
 
     @classmethod
-    def from_directory(cls, tokenizer_dir='tokenizers', json_file="tokenizer.json"):
+    def from_json(cls, tokenizer_path='tokenizers/tokenizer.json'):
         # init from a local directory on disk (e.g. "out/tokenizer")
-        tokenizer_path = os.path.join(tokenizer_dir, json_file)
+        # tokenizer_path = os.path.join(tokenizer_dir, json_file)
         tokenizer = HFTokenizer.from_file(tokenizer_path)
         return cls(tokenizer)
 

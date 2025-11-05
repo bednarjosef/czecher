@@ -6,15 +6,13 @@ from multiprocessing import Pool
 from functools import partial
 from typing import Tuple, List
 
-from czecher_tokenizers.bpe_tokenizer import GPTTokenizer
-from czecher_tokenizers.tokenizer import Tokenizer
+from tokenizer import Tokenizer
 
 COMMA = ','
 
 
 def create_tokenizer() -> Tokenizer:
-    # e.g. return Tokenizer("path/to/model")
-    return GPTTokenizer(json_file='tokenizer.json')
+    return Tokenizer.from_json('downloads/syn2006/tokenizer.json')
 
 
 def get_data_pair(sentence: str, tokenizer: Tokenizer, max_tokens: int) -> Tuple[List[int], List[int]]:
