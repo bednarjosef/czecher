@@ -9,9 +9,11 @@ from utils.train_logger import log_step_wandb
 
 
 class CzecherTransformer(nn.Module):
-    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 256, max_tokens: int = 128, d_model: int = 256, nhead: int = 4, num_layers: int = 5, dim_ff: int = 512, dropout: float = 0.1):  # max_tokens = 512
+    def __init__(self, vocab_size: int, pad_id: int, embedding_dim: int = 256, max_tokens: int = 128, d_model: int = 256, nhead: int = 4, num_layers: int = 5, dim_ff: int = 512, dropout: float = 0.1, max_len=None):  # max_tokens = 512
         super().__init__()
         self.pad_id = pad_id
+        if max_len:
+            max_tokens = max_len
         self.embed = nn.Embedding(vocab_size, embedding_dim, padding_idx=pad_id)
         self.pos = nn.Embedding(max_tokens, d_model)
 
@@ -27,7 +29,7 @@ class CzecherTransformer(nn.Module):
             vocab_size=vocab_size,
             pad_id=pad_id,
             embedding_dim=embedding_dim,
-            max_len=max_tokens,
+            max_tokens=max_tokens,
             d_model=d_model,
             nhead=nhead,
             num_layers=num_layers,
@@ -234,6 +236,7 @@ class CzecherTransformer(nn.Module):
 
     @torch.no_grad()
     def punctuate(self, text: str, tokenizer: Tokenizer, threshold: float = 0.5, device='cuda'):
+        ts = time.time()
         ## TODO: add option if threshold='best' to use from self.get_best_eval()
         """Return a corrected sentence."""
         token_ids = tokenizer.tokenize(text, max_tokens=128)
@@ -248,6 +251,7 @@ class CzecherTransformer(nn.Module):
             punctuated += tokenizer.detokenize([token_ids[idx]])
             if probs[idx] >= threshold:
                 punctuated += ','
+        print(f'Punctuation finished in {round(time.time()-ts, 3)} seconds.')
         return punctuated
     
     @torch.no_grad()

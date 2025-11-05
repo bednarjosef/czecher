@@ -11,9 +11,7 @@ from czecher_tokenizers.tokenizer import Tokenizer
 
 COMMA = ','
 
-# ----------------------------
-# You may want to customize this factory if your Tokenizer needs args
-# ----------------------------
+
 def create_tokenizer() -> Tokenizer:
     # e.g. return Tokenizer("path/to/model")
     return GPTTokenizer(json_file='tokenizer.json')

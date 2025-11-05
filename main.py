@@ -47,42 +47,44 @@ def main():
     lr = 2e-4
     pos_weight = 1
 
-    layers = 10
-    d_model = layers * 64
-    nhead = max(1, d_model // 64)
-    while d_model % nhead != 0:
-        nhead -= 1
-    dim_ff = 4 * d_model
+    num_layers = 12
+    model_dim = num_layers * 64
+    num_heads = max(1, (model_dim + 127) // 128)  # ~128 head dim
+    dim_ff = 4 * model_dim
     
 
-    run = wandb.init(
-        entity="czecher-team",
-        project="czecher-commas",
-        config={
-            "epochs": epochs,
-            "batch_size": batch_size,
-            "learning_rate": lr,
-            "pos_weight": pos_weight,
-            "layers": layers,
-            "d_model": d_model,
-            "num_heads": nhead,
-            "dim_ff": dim_ff,
-            "architecture": "Transformer",
-            "dataset": "comma_memmap_5m"
-        }
-    )
+    # run = wandb.init(
+    #     entity="czecher-team",
+    #     project="czecher-commas",
+    #     config={
+    #         "epochs": epochs,
+    #         "batch_size": batch_size,
+    #         "learning_rate": lr,
+    #         "pos_weight": pos_weight,
+    #         "layers": layers,
+    #         "d_model": d_model,
+    #         "num_heads": nhead,
+    #         "dim_ff": dim_ff,
+    #         "architecture": "Transformer",
+    #         "dataset": "comma_memmap_5m"
+    #     }
+    # )
 
     tokenizer = GPTTokenizer(json_file='tokenizer.json')
     # dataset = CommaDataset().load_dataset(csv_path='data/bpe/dataset_500k.csv')
     # dataset = CommaMemmapDataset("./comma_memmap/inputs.bin", "./comma_memmap/labels.bin", max_tokens=128, pad_id=tokenizer.get_pad_token_id())
-    model = CzecherTransformer(vocab_size=tokenizer.get_vocab_size(), pad_id=tokenizer.get_pad_token_id(), max_tokens=128, num_layers=layers, d_model=d_model, embedding_dim=d_model, nhead=nhead, dim_ff=dim_ff)
-    model = model.load('data/trained_models/500k_model7.pt')
+    model = CzecherTransformer(vocab_size=tokenizer.get_vocab_size(), pad_id=tokenizer.get_pad_token_id(), max_tokens=128, num_layers=num_layers, d_model=model_dim, embedding_dim=model_dim, nhead=num_heads, dim_ff=dim_ff)
+    model = model.load('data/trained_models/5m_model_4gpu_2.pt', torch.device('cpu'))
 
     # best_threshold, progress = model.train_model(dataset, epochs=epochs, batch_size=batch_size, lr=lr, pos_weight=pos_weight, log_every=300, log_fn=run.log)
     # model.save('data/trained_models/5m_model1.pt')
 
     text = "V roce 1971 pak Salivarová a Škvorecký založili nakladatelství '68 Publishers kde pak vydávali především české knihy které nemohly vycházet v komunistickém Československu."
-    corrected = model.punctuate(text, tokenizer, threshold=0.45, device=None)
+    text = "Teoreticko-lingvistické zkoumání se zakládá na obecné vědecké metodě: jeho výstupem jsou explicitní formálně zpracované teorie a hypotézy jejichž platnost je následně testována s pomocí dat z konkrétních jazyků."
+    text = "Historická lingvistika zkoumá jazyky které se užívaly v minulosti (starou češtinu staroslověnštinu apod.) popř. se zaměřuje na výzkum vývoje jazyka v čase (viz níže: diachronní přístup)."
+    text = "Jazyk je velmi mnohotvárný jev a v závislosti na tom z jakého úhlu k němu přistupujeme můžeme lingvistiku zařadit do několika širších disciplín."
+    text = "Lingvistika z tohoto úhlu pohledu je tedy příbuzná vědám o nelingvistických znacích a prostředcích komunikace jako je neverbální komunikace různé pomocné komunikační systémy např. světelné či kouřové signály nebo znakové systémy uměle vytvářené pro potřebu komunikace s počítači a stroji."
+    corrected = model.punctuate(text, tokenizer, threshold=0.45, device='cpu')
     print(text)
     print(corrected)
 

@@ -8,14 +8,13 @@ SPECIAL_TOKENS = [
 ]
 
 SPLIT_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,2}|,| ?[^\s\p{L}\p{N},]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+"""
-
 # Generic GPT-4-style tokenizer based on HuggingFace Tokenizer
 from tokenizers import Tokenizer as HFTokenizer
 from tokenizers import pre_tokenizers, decoders, Regex
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
 
-class HuggingFaceTokenizer:
+class Tokenizer:
     """Light wrapper around HuggingFace Tokenizer for some utilities"""
 
     def __init__(self, tokenizer):
@@ -28,7 +27,7 @@ class HuggingFaceTokenizer:
         return cls(tokenizer)
 
     @classmethod
-    def from_directory(cls, tokenizer_dir, json_file="tokenizer.json"):
+    def from_directory(cls, tokenizer_dir='tokenizers', json_file="tokenizer.json"):
         # init from a local directory on disk (e.g. "out/tokenizer")
         tokenizer_path = os.path.join(tokenizer_dir, json_file)
         tokenizer = HFTokenizer.from_file(tokenizer_path)
@@ -116,11 +115,11 @@ class HuggingFaceTokenizer:
         comma = self._encode_one(',')
         return comma
 
-    def encode(self, text, *args, **kwargs):
+    def encode(self, text, prepend=None, append=None):
         if isinstance(text, str):
-            return self._encode_one(text, *args, **kwargs)
+            return self._encode_one(text, prepend, append)
         elif isinstance(text, list):
-            return [self._encode_one(t, *args, **kwargs) for t in text]
+            return [self._encode_one(t, prepend, append) for t in text]
         else:
             raise ValueError(f"Invalid input type: {type(text)}")
 
@@ -130,9 +129,18 @@ class HuggingFaceTokenizer:
     def decode(self, ids, skip_special_tokens = True):
         return self.tokenizer.decode(ids, skip_special_tokens=skip_special_tokens)
 
-    def save(self, tokenizer_dir, json_name='tokenizer.json'):
+    def save(self, tokenizer_dir='tokenizers', json_name='tokenizer.json'):
         # save the tokenizer to disk
         os.makedirs(tokenizer_dir, exist_ok=True)
         tokenizer_path = os.path.join(tokenizer_dir, json_name)
         self.tokenizer.save(tokenizer_path)
         print(f"Saved tokenizer to {tokenizer_path}")
+
+    def print_split(self, text: str, prepend=None, append=None):
+        token_ids = self.encode(text, prepend, append)
+        decoded = []
+        for tid in token_ids:
+            token = self.decode([tid])
+            decoded.append(token)
+
+        print('|'.join(decoded))

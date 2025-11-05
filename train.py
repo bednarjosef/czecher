@@ -14,9 +14,9 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 import wandb
 
-from czecher_tokenizers.bpe_tokenizer import GPTTokenizer
+from czecher_tokenizers.czecher_tokenizer import Tokenizer
 from models.transformer_model import CzecherTransformer
-from memmap_dataset import CommaMemmapDataset
+from memmap_dataset import MemmapDataset
 
 
 # ----------------------------
@@ -30,7 +30,7 @@ epochs = 2
 eval_every = 1000            # optimizer steps (global) between evals
 batch_size_per_gpu = 512     # per-rank (per GPU)
 grad_accum_steps = 2
-dataset_size = 10_000_000
+dataset_size = 11_000_000
 
 # Optimization
 weight_decay = 0.01
@@ -69,10 +69,12 @@ use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
 autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16) if device.type == "cuda" else nullcontext()
 synchronize = torch.cuda.synchronize if device.type == "cuda" else (lambda: None)
 
+ds_path = ''
+
 # ----------------------------
 # Tokenizer / model dims
 # ----------------------------
-tokenizer = GPTTokenizer(json_file="tokenizer.json")
+tokenizer = Tokenizer.from_directory(tokenizer_dir=ds_path, json_file='')
 vocab_size = tokenizer.get_vocab_size()
 if is_master:
     print(f"Vocab size: {vocab_size:,}")
@@ -108,11 +110,11 @@ if is_master:
 # ----------------------------
 # Dataset / Loaders
 # ----------------------------
-dataset = CommaMemmapDataset("./comma_memmap/inputs.bin", "./comma_memmap/labels.bin", max_tokens=max_tokens, pad_id=tokenizer.get_pad_token_id())
+dataset = MemmapDataset(ds_path, max_tokens=max_tokens, pad_id=tokenizer.get_pad_token_id())
 
 if is_master:
     print("Creating splits...")
-split = int(0.90 * len(dataset))
+split = int(0.95 * len(dataset))
 train_ds, eval_ds = torch.utils.data.random_split(dataset, [split, len(dataset) - split])
 
 # Samplers
@@ -304,7 +306,7 @@ for epoch in range(1, epochs + 1):
             model.eval()
             # unwrap if DDP for evaluation helper
             eval_model = model.module if ddp else model
-            best_eval = eval_model.get_best_eval(eval_loader, device=str(device))
+            best_eval = eval_model.get_best_eval(eval_loader, device=str(device))  ## TODO: ONLY 50% THRESHOLD EVAL, also get train/precision,recall,f1
             best_eval["train/loss"] = total_loss / max(1, (step_in_epoch))
             run.log(best_eval, step=global_step)
             print(f"[eval] step={global_step} loss={best_eval['train/loss']:.4f} f1={best_eval['eval/f1']:.3f}")
