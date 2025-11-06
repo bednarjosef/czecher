@@ -4,8 +4,6 @@ Trained on 11 million sentences (128 tokens), parallel GPU training with torchru
 
 # Try it out
 You can try out the Czecher model on [czecher.cz](https://czecher-web-pq4z.vercel.app).
-You can try out the Czecher model on <a href="https://czecher-web-pq4z.vercel.app">czecher.cz</a>.
-
 
 <!-- <p align="left"> <a href="https://pytorch.org/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-2.x-ee4c2c?logo=pytorch&logoColor=white"></a> <a href="#"><img alt="License" src="https://img.shields.io/badge/License-MIT-green"></a> <a href="#"><img alt="W&B" src="https://img.shields.io/badge/Weights%20%26%20Biases-Logging-yellow"></a> </p> -->
 
