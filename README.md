@@ -3,7 +3,7 @@
 
 # czecher
 A lightweight Transformer that learns where to put commas in Czech sentences.
-Trained on 11 million sentences (128 tokens), parallel GPU training with torchrun (DDP), and Wandb logging.
+Trained on 11 million sentences (128 tokens), parallel GPU training with torchrun (DDP) on 4x RTX 5090, and Wandb logging.
 
 For more details about the model and the training process please view my short PDF report [here](https://drive.google.com/file/d/11CWAZOiqp78P5ZBqHHVEYrpJ20EcV7fL/view?usp=sharing).
 
