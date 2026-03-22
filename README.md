@@ -4,6 +4,7 @@
 # czecher
 A lightweight Transformer that learns where to put commas in Czech sentences.
 Trained on 11 million sentences (128 tokens), parallel GPU training with torchrun (DDP), and Wandb logging.
+You can find details about the model and training process in my Czech report [here](https://drive.google.com/file/d/11CWAZOiqp78P5ZBqHHVEYrpJ20EcV7fL/view?usp=sharing).
 
 # Try it out
 You can try out the Czecher model on [czecher.cz](https://czecher.cz).
