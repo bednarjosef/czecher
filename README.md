@@ -10,6 +10,9 @@ For more details about the model and the training process please view my short P
 # Try it out
 You can try out the Czecher model on [czecher.cz](https://czecher.cz).
 
+# Dataset
+For simplicity of my own training and for everyone else to use I uploaded a filtered version of the [SYN2006PUB corpus](https://wiki.korpus.cz/doku.php/en:cnk:syn2006pub) on HuggingFace. Available [here](https://huggingface.co/datasets/josefbednar/11m-czech-sentences).
+
 <!-- <p align="left"> <a href="https://pytorch.org/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-2.x-ee4c2c?logo=pytorch&logoColor=white"></a> <a href="#"><img alt="License" src="https://img.shields.io/badge/License-MIT-green"></a> <a href="#"><img alt="W&B" src="https://img.shields.io/badge/Weights%20%26%20Biases-Logging-yellow"></a> </p> -->
 
 # Quickstart - Linux
@@ -30,7 +33,7 @@ pip install -r requirements.txt
 python3 setup.py
 ```
 
-## Download a dataset
+## Download the dataset
 ```bash
 # Download a specified HF dataset repository into /downloads/
 python3 download.py --repo josefbednar/syn2006pub-11m-128-tokens-commas
