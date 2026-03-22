@@ -1,3 +1,6 @@
+<img width="1416" height="437" alt="image" src="https://github.com/user-attachments/assets/ec2872ca-029d-4deb-819a-bcb335a1212f" />
+
+
 # czecher
 A lightweight Transformer that learns where to put commas in Czech sentences.
 Trained on 11 million sentences (128 tokens), parallel GPU training with torchrun (DDP), and Wandb logging.
