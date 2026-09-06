@@ -14,10 +14,6 @@ You can try out the Czecher model on [czecher.cz](https://czecher-web-pq4z.verce
 git clone https://github.com/bednarjosef/czecher.git
 cd czecher
 
-# Create a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
 # Install packages from requirements.txt
 pip install -r requirements.txt
 

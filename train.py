@@ -21,19 +21,15 @@ from model import CzecherTransformer
 from dataset import MemmapDataset
 
 
-# parser = argparse.ArgumentParser(description='Start the training loop.')
-# parser.add_argument('--tokenizer_path', type=str, help='Direct path to the tokenizer json.')
-# args = parser.parse_args()
-
-dataset_path = 'downloads/dataset'
-tokenizer_path = 'downloads/dataset/tokenizer.json'
-save_name = '11m_12layer_2epoch.pt'
+dataset_path = 'downloads/josefbednar/syn2006pub-11m-128-tokens-commas'
+tokenizer_path = dataset_path + '/syn2006pub_11m_tokenizer.json'
+save_name = '11m_16layer_2epoch.pt'
 
 # ----------------------------
 # User/configurable settings
 # ----------------------------
-depth = 12
-lr = 1e-4                    # base LR (we'll scale by world_size below if you want)
+depth = 16
+lr = 1e-4
 dropout = 0.05
 max_tokens = 128
 epochs = 1
@@ -44,9 +40,9 @@ grad_accum_steps = 2
 # Optimization
 weight_decay = 0.01
 grad_clip = 1.0
-warmup_ratio = 0.10          # 10% warmup
-warmdown_ratio = 0.20        # last 20% cosine tail to floor
-final_lr_frac = 0.20         # floor = 20% of peak
+warmup_ratio = 0.10
+warmdown_ratio = 0.20
+final_lr_frac = 0.20
 
 # ----------------------------
 # DDP / device init
@@ -60,13 +56,11 @@ def ddp_init():
         world_size = int(os.environ["WORLD_SIZE"])
         torch.cuda.set_device(local_rank)
         device = torch.device(f"cuda:{local_rank}")
-        is_master = rank == 0
     else:
         rank = 0
         local_rank = 0
         world_size = 1
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        is_master = True
     return ddp, rank, local_rank, world_size, device
 
 ddp, rank, local_rank, world_size, device = ddp_init()
@@ -95,7 +89,7 @@ dim_ff = 4 * model_dim
 # Model
 # ----------------------------
 model = CzecherTransformer(
-    vocab_size=vocab_size,
+    vocab_size=tokenizer.get_vocab_size(),
     pad_id=tokenizer.get_pad_token_id(),
     max_tokens=max_tokens,
     num_layers=num_layers,
@@ -113,6 +107,7 @@ num_params = sum(p.numel() for p in model.parameters())
 if is_master:
     print(f"Number of parameters: {num_params:,}")
 
+
 # ----------------------------
 # Dataset / Loaders
 # ----------------------------
@@ -120,13 +115,11 @@ dataset = MemmapDataset(dataset_path, max_tokens=max_tokens, pad_id=tokenizer.ge
 
 if is_master:
     print("Creating splits...")
-split = int(0.95 * len(dataset))
+split = int(0.975 * len(dataset))
 train_ds, eval_ds = torch.utils.data.random_split(dataset, [split, len(dataset) - split])
 
 # Samplers
 train_sampler = DistributedSampler(train_ds, num_replicas=world_size, rank=rank, shuffle=True, drop_last=True) if ddp else None
-# We'll only evaluate on rank 0; use a normal (non-distributed) eval loader there.
-# Non-master ranks will set eval_loader=None and skip eval.
 
 if is_master:
     print("Creating DataLoaders...")
@@ -167,17 +160,15 @@ def make_cosine_warmup_sched(total_steps: int, warmup_ratio=0.10, floor_frac=0.2
     warmup_steps = max(1, int(warmup_ratio * total_steps))
     import math
     def lr_mult(step):
-        # step is 0-based global optimizer step index
         if step < warmup_steps:
             return (step + 1) / warmup_steps
         t = (step - warmup_steps) / max(1, total_steps - warmup_steps)
-        # cosine from 1.0 to floor
         return floor_frac + (1.0 - floor_frac) * 0.5 * (1.0 + math.cos(math.pi * t))
     return lr_mult
 
 lr_mult = make_cosine_warmup_sched(total_steps, warmup_ratio, final_lr_frac)
 
-# Optionally scale LR linearly with world size (classic rule-of-thumb).
+# Scale LR linearly with world size (classic rule-of-thumb).
 scaled_lr = lr * world_size
 
 # ----------------------------
@@ -312,7 +303,7 @@ for epoch in range(1, epochs + 1):
             model.eval()
             # unwrap if DDP for evaluation helper
             eval_model = model.module if ddp else model
-            eval = eval_model.get_full_eval(train_loader, eval_loader, threshold=0.5, device=str(device))
+            eval = eval_model.get_eval(eval_loader, threshold=0.5, device=str(device))
             eval["train/loss"] = total_loss / max(1, (step_in_epoch))
             run.log(eval, step=global_step)
             print(f"[eval] step={global_step} loss={eval['train/loss']:.4f} f1={eval['eval/f1']:.3f}")
